@@ -21,7 +21,7 @@ Use this skill to initialize a new project chronicle division in the vault.
 2. **Execute Init Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "../../scripts/chronicle_helper.py" init --project <project_name>
+   python "C:\Users\johnp\.gemini\config\plugins\chronicle\scripts\chronicle_helper.py" init --project <project_name>
    ```
 
 3. **Confirm to User:**

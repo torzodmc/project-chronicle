@@ -21,7 +21,7 @@ Instead of losing human intent, conversational debates, architectural pivots, an
 
 ## The Chronicle Skill Suite
 
-Project Chronicle exposes 9 modular, namespaced agent skills compatible with **Antigravity**, **Claude Code**, and agentic coding platforms:
+Project Chronicle exposes 10 modular, namespaced agent skills compatible with **Antigravity**, **Claude Code**, and agentic coding platforms:
 
 | Skill / Command | Trigger Alias | Description |
 |---|---|---|
@@ -34,6 +34,7 @@ Project Chronicle exposes 9 modular, namespaced agent skills compatible with **A
 | `/chronicle:jump` | `/chronicle-jump` | Fast-forwards tracking across multiple unchronicled iterations (e.g. $V_1 \to V_5$), cleanly recording skipped gaps. |
 | `/chronicle:reopen` | `/chronicle-reopen` | Reopens a historical completed milestone for retroactive amendments or ongoing refinement. |
 | `/chronicle:status` | `/chronicle-status` | Displays project health, active version pointer, total versions, and historical progression timeline. |
+| `/chronicle:evolve` | `/chronicle-evolve` | Autonomous multi-agent evolutionary R&D engine coordinating hypothesis testing and monotonic version progression. |
 
 ---
 

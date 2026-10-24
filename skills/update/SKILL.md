@@ -73,7 +73,7 @@ If an idea, design pattern, or optimization failed or proved harmful, log it imm
 1. **Verify Current Status:**
    Run the status helper to confirm the active project and version:
    ```bash
-   python "../../scripts/chronicle_helper.py" status
+   python "C:\Users\johnp\.gemini\config\plugins\chronicle\scripts\chronicle_helper.py" status
    ```
 
 2. **Clarify Ambiguities (if any):**
@@ -97,7 +97,7 @@ If an idea, design pattern, or optimization failed or proved harmful, log it imm
 
 6. **Validate State & Dossiers:**
    ```bash
-   python "../../scripts/chronicle_helper.py" validate
+   python "C:\Users\johnp\.gemini\config\plugins\chronicle\scripts\chronicle_helper.py" validate
    ```
 
 7. **Present Summary:**

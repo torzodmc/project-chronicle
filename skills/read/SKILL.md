@@ -28,7 +28,7 @@ When this skill is invoked:
 1. **Execute Read Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "../../scripts/chronicle_helper.py" read
+   python "C:\Users\johnp\.gemini\config\plugins\chronicle\scripts\chronicle_helper.py" read
    ```
    *(If targeting a specific project: append `--project <name>`)*
 

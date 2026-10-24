@@ -31,7 +31,7 @@ Use this skill to permanently capture experimental breakthroughs, specialized al
 Run the helper to scaffold the discovery dossier and register it in `state.json` and `master_evolution.md`:
 
 ```bash
-python "../../scripts/chronicle_helper.py" discover --title "<Discovery Title>" --asset-path "<primary_code_or_asset_path>" --summary "<one_line_summary>"
+python "C:\Users\johnp\.gemini\config\plugins\chronicle\scripts\chronicle_helper.py" discover --title "<Discovery Title>" --asset-path "<primary_code_or_asset_path>" --summary "<one_line_summary>"
 ```
 *(If targeting a specific project: append `--project <name>`)*
 
@@ -75,7 +75,7 @@ Open and complete the generated discovery file in the vault. The dossier consist
 Run schema validation to verify that all dossiers and catalog entries remain structurally valid:
 
 ```bash
-python "../../scripts/chronicle_helper.py" validate
+python "C:\Users\johnp\.gemini\config\plugins\chronicle\scripts\chronicle_helper.py" validate
 ```
 
 ---

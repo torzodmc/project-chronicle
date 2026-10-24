@@ -23,7 +23,7 @@ Before sealing a version, ensure:
 1. **Execute Complete Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "../../scripts/chronicle_helper.py" complete
+   python "C:\Users\johnp\.gemini\config\plugins\chronicle\scripts\chronicle_helper.py" complete
    ```
    *(By default, this automatically seals the current active version. Optionally pass `--version <N>` to seal a specific version)*
 
