@@ -97,7 +97,7 @@ def _save_state(vault, state):
     os.makedirs(vault, exist_ok=True)
     state["last_updated"] = _utc_now_iso()
     state_file = os.path.join(vault, "state.json")
-    tmp_file = state_file + ".tmp"
+    tmp_file = f"{state_file}.{os.getpid()}.tmp"
     with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
         f.flush()
@@ -490,9 +490,20 @@ def sync_project(project_name=None, version=None, vault_path=None):
     state["active_project"] = pname
     if version is not None:
         v_num = int(version)
+        known_versions = [v["version"] for v in state["projects"][pname].get("versions", [])]
+        if v_num not in known_versions:
+            return {
+                "success": False,
+                "error": f"Version {v_num} does not exist in project '{pname}'. Known versions: {known_versions}. Use /chronicle:jump to fast-forward."
+            }
         state["projects"][pname]["active_version"] = v_num
         
     _save_state(vault, state)
+
+    project_dir = os.path.join(vault, "projects", pname)
+    master_file = os.path.join(project_dir, "master_evolution.md")
+    _ensure_6_chapter_master(master_file, pname)
+
     return get_status(pname, vault_path=vault)
 
 
@@ -509,6 +520,7 @@ def read_project(project_name=None, vault_path=None, include_content=True):
     project_dir = os.path.join(vault, "projects", pname)
     master_file = os.path.join(project_dir, "master_evolution.md")
     graveyard_file = os.path.join(project_dir, "graveyard_of_traps.md")
+    _ensure_6_chapter_master(master_file, pname)
     
     master_content = ""
     graveyard_content = ""
@@ -648,32 +660,43 @@ def complete_version(version=None, project_name=None, vault_path=None):
     if os.path.exists(v_file):
         with open(v_file, "r", encoding="utf-8") as f:
             content = f.read()
-        content = re.sub(r'(?m)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*in_progress\s*$', r'**Status:** completed', content)
+        content = re.sub(r'(?mi)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*(?:in_progress|in[ -]progress)\s*$', r'**Status:** completed  ', content)
         with open(v_file, "w", encoding="utf-8") as f:
             f.write(content)
 
-    # Next version becomes N + 1
-    next_v = v_num + 1
-    next_entry = next((v for v in pdata.get("versions", []) if v["version"] == next_v), None)
-    if not next_entry:
-        pdata["versions"].append({
-            "version": next_v,
-            "title": f"Milestone {next_v}",
-            "file": f"versions/v{next_v}.md",
-            "status": "in_progress",
-            "created_at": _utc_now_iso()
-        })
+    recorded_versions = pdata.get("versions", [])
+    max_v = max((v["version"] for v in recorded_versions), default=v_num)
+
+    if v_num < max_v:
+        # Completing a reopened historical version (e.g. V2 while project is at V5)
+        highest_in_prog = next((v["version"] for v in reversed(recorded_versions) if v.get("status") == "in_progress"), max_v)
+        pdata["active_version"] = highest_in_prog
+        next_v = highest_in_prog
     else:
-        next_entry["status"] = "in_progress"
+        # Normal sequential progression: V_N completed, advance to V_{N+1}
+        next_v = v_num + 1
+        next_entry = next((v for v in recorded_versions if v["version"] == next_v), None)
+        if not next_entry:
+            pdata["versions"].append({
+                "version": next_v,
+                "title": f"Milestone {next_v}",
+                "file": f"versions/v{next_v}.md",
+                "status": "in_progress",
+                "created_at": _utc_now_iso()
+            })
+        else:
+            next_entry["status"] = "in_progress"
+            next_entry["file"] = f"versions/v{next_v}.md"
 
-    pdata["active_version"] = next_v
+        pdata["active_version"] = next_v
+
+        # Scaffold v{next_v}.md if missing
+        next_file = os.path.join(vault, "projects", pname, "versions", f"v{next_v}.md")
+        if not os.path.exists(next_file):
+            with open(next_file, "w", encoding="utf-8") as f:
+                f.write(_generate_v_template(next_v))
+
     _save_state(vault, state)
-
-    # Scaffold v{next_v}.md if missing
-    next_file = os.path.join(vault, "projects", pname, "versions", f"v{next_v}.md")
-    if not os.path.exists(next_file):
-        with open(next_file, "w", encoding="utf-8") as f:
-            f.write(_generate_v_template(next_v))
 
     return {
         "success": True,
@@ -717,7 +740,7 @@ def jump_version(target_version, project_name=None, vault_path=None):
         if os.path.exists(curr_file):
             with open(curr_file, "r", encoding="utf-8") as f:
                 content = f.read()
-            content = re.sub(r'(?m)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*in_progress\s*$', r'**Status:** completed', content)
+            content = re.sub(r'(?mi)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*(?:in_progress|in[ -]progress)\s*$', r'**Status:** completed  ', content)
             with open(curr_file, "w", encoding="utf-8") as f:
                 f.write(content)
                 
@@ -782,12 +805,15 @@ def jump_version(target_version, project_name=None, vault_path=None):
             suffix = parts[1]
             if "## 6. Discoveries & Research Catalog" in suffix:
                 ch5_body, ch6_body = suffix.split("## 6. Discoveries & Research Catalog", 1)
-                m_content = prefix + ch5_body.rstrip() + "\n" + log_text + "\n---\n\n## 6. Discoveries & Research Catalog" + ch6_body
+                clean_ch5 = re.sub(r'(?:\r?\n)*---\s*$', '', ch5_body.rstrip())
+                m_content = prefix + clean_ch5.rstrip() + "\n" + log_text + "\n---\n\n## 6. Discoveries & Research Catalog" + ch6_body
             else:
-                m_content = prefix + suffix.rstrip() + "\n" + log_text
+                clean_ch5 = re.sub(r'(?:\r?\n)*---\s*$', '', suffix.rstrip())
+                m_content = prefix + clean_ch5.rstrip() + "\n" + log_text
         elif "## 3. Comprehensive Version Progression Log" in m_content:
             parts = m_content.split("## 3. Comprehensive Version Progression Log", 1)
-            m_content = parts[0] + "## 3. Comprehensive Version Progression Log\n" + parts[1].rstrip() + "\n" + log_text
+            clean_ch3 = re.sub(r'(?:\r?\n)*---\s*$', '', parts[1].rstrip())
+            m_content = parts[0] + "## 3. Comprehensive Version Progression Log\n" + clean_ch3.rstrip() + "\n" + log_text
         else:
             m_content += f"\n\n---\n\n## 5. Comprehensive Version Progression Log\n{log_text}\n"
             
@@ -819,14 +845,18 @@ def reopen_version(version, project_name=None, vault_path=None):
         return {"success": False, "error": f"Version {v_num} does not exist in project '{pname}'"}
         
     v_entry["status"] = "in_progress"
+    v_entry["file"] = f"versions/v{v_num}.md"
     pdata["active_version"] = v_num
     _save_state(vault, state)
     
     v_file = os.path.join(vault, "projects", pname, "versions", f"v{v_num}.md")
-    if os.path.exists(v_file):
+    if not os.path.exists(v_file):
+        with open(v_file, "w", encoding="utf-8") as f:
+            f.write(_generate_v_template(v_num))
+    else:
         with open(v_file, "r", encoding="utf-8") as f:
             content = f.read()
-        content = re.sub(r'(?m)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*completed\s*$', r'**Status:** in_progress', content)
+        content = re.sub(r'(?mi)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*(?:completed|skipped|in_progress|in[ -]progress)\s*$', r'**Status:** in_progress  ', content)
         if "## Retroactive Reopening & Amendments" not in content:
             content += f"\n\n---\n\n## Retroactive Reopening & Amendments ({_utc_now_date()})\n"
         with open(v_file, "w", encoding="utf-8") as f:

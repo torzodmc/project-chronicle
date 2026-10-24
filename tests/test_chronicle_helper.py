@@ -190,6 +190,106 @@ class TestChronicleHelper(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             chronicle._load_state(self.vault)
 
+    def test_reopen_skipped_version_scaffolds_file_and_validates(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        chronicle.jump_version(4, "test-project", vault_path=self.vault)
+        
+        # v2 was skipped and had no dossier file
+        v2_path = os.path.join(self.vault, "projects", "test-project", "versions", "v2.md")
+        self.assertFalse(os.path.exists(v2_path))
+
+        # Reopen v2
+        res = chronicle.reopen_version(2, "test-project", vault_path=self.vault)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["active_version"], 2)
+        
+        # Dossier file must now exist
+        self.assertTrue(os.path.exists(v2_path))
+        with open(v2_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        self.assertIn("**Status:** in_progress", content)
+
+        # Validation must pass cleanly without missing dossier errors
+        val = chronicle.validate_vault("test-project", vault_path=self.vault)
+        self.assertTrue(val["valid"])
+        self.assertEqual(len(val["errors"]), 0)
+
+    def test_complete_historical_version_preserves_future_milestones(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        chronicle.jump_version(4, "test-project", vault_path=self.vault)
+        
+        # Active is now 4. Let's reopen 1 to make an amendment
+        chronicle.reopen_version(1, "test-project", vault_path=self.vault)
+        status_reopen = chronicle.get_status("test-project", vault_path=self.vault)
+        self.assertEqual(status_reopen["active_version"], 1)
+
+        # Complete version 1
+        res = chronicle.complete_version(1, "test-project", vault_path=self.vault)
+        self.assertTrue(res["success"])
+        
+        # Active version should restore to 4 (the latest in_progress milestone), NOT corrupt v2/v3
+        self.assertEqual(res["next_active_version"], 4)
+        
+        with open(os.path.join(self.vault, "state.json"), "r", encoding="utf-8") as f:
+            state = json.load(f)
+        pdata = state["projects"]["test-project"]
+        self.assertEqual(pdata["active_version"], 4)
+        
+        # v2 and v3 must remain skipped
+        v2 = next(v for v in pdata["versions"] if v["version"] == 2)
+        v3 = next(v for v in pdata["versions"] if v["version"] == 3)
+        self.assertEqual(v2["status"], "skipped")
+        self.assertEqual(v3["status"], "skipped")
+
+    def test_sync_project_validates_version_existence(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        
+        # Syncing to a non-existent version must return an error
+        err_res = chronicle.sync_project("test-project", version=99, vault_path=self.vault)
+        self.assertFalse(err_res["success"])
+        self.assertIn("Version 99 does not exist", err_res["error"])
+
+        # Syncing to existing version 1 succeeds
+        ok_res = chronicle.sync_project("test-project", version=1, vault_path=self.vault)
+        self.assertTrue(ok_res["success"])
+        self.assertEqual(ok_res["active_version"], 1)
+
+    def test_resolve_project_name_and_workspace_isolation(self):
+        state = {
+            "active_project": "default-proj",
+            "projects": {
+                "proj-alpha": {"workspace_root": os.path.join(self.test_dir, "alpha")},
+                "proj-beta": {"workspace_root": os.path.join(self.test_dir, "beta", "sub")}
+            }
+        }
+        
+        # Explicit name takes priority
+        self.assertEqual(chronicle._resolve_project_name("custom-name", state), "custom-name")
+
+        # Fallback when no match
+        self.assertEqual(chronicle._resolve_project_name(None, state), "default-proj")
+
+    def test_cli_complete_with_omitted_version(self):
+        import subprocess
+        chronicle.init_project("test-project", vault_path=self.vault)
+        helper_path = os.path.abspath(chronicle.__file__)
+
+        # Run complete CLI without --version flag
+        cmd = [
+            sys.executable,
+            helper_path,
+            "complete",
+            "--vault", self.vault,
+            "--project", "test-project"
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"CLI stderr: {proc.stderr}")
+        
+        data = json.loads(proc.stdout)
+        self.assertTrue(data["success"])
+        self.assertEqual(data["completed_version"], 1)
+        self.assertEqual(data["next_active_version"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()
