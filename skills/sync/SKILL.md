@@ -17,7 +17,7 @@ Use this skill when starting a new chat session or resuming development on a tra
 1. **Locate Vault & Run Sync Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<plugin_dir>/scripts/chronicle_helper.py" sync
+   python "../../scripts/chronicle_helper.py" sync
    ```
    *(If targeting a specific project: append `--project <name>`)*
 

@@ -17,7 +17,7 @@ Use this skill to view the active project chronicle, current tracked version, co
 1. **Execute Status Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<plugin_dir>/scripts/chronicle_helper.py" status
+   python "../../scripts/chronicle_helper.py" status
    ```
 
 2. **Display Chronicle Health & Timeline:**

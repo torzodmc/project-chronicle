@@ -39,3 +39,10 @@ Thumbs.db
 *.swo
 .vscode/
 .idea/
+
+
+# Chronicle Vault & Lock Artifacts
+.chronicle/
+.chronicles/
+.state.lock
+*.tmp

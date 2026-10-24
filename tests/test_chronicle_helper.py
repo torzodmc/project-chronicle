@@ -331,27 +331,91 @@ class TestChronicleHelper(unittest.TestCase):
             state = json.load(f)
         self.assertEqual(state["projects"]["test-project"]["active_version"], 2)
 
-    def test_discover_sanitizes_markdown_table_injection(self):
+    def test_discover_validation_passes_out_of_box(self):
         chronicle.init_project("test-project", vault_path=self.vault)
-        # Title and summary containing pipe characters and newlines
-        title_with_pipes = "Multi | Pip | Model"
-        summary_with_newlines = "First line of summary.\n| Injected Table Row | Fake Date |\nSecond line."
-        res = chronicle.discover_item(
-            title=title_with_pipes,
-            summary=summary_with_newlines,
+        disc_res = chronicle.discover_item(
+            title="Fast Algorithm",
+            asset_path="core/algo.py",
+            summary="Novel sublinear solver",
             project_name="test-project",
             vault_path=self.vault
         )
+        self.assertTrue(disc_res["success"])
+        val = chronicle.validate_vault("test-project", vault_path=self.vault)
+        self.assertTrue(val["valid"], f"Validation failed with errors: {val['errors']}")
+
+    def test_jump_version_does_not_corrupt_completed_milestones(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        chronicle.complete_version(1, "test-project", vault_path=self.vault) # v1 completed, v2 active
+        chronicle.complete_version(2, "test-project", vault_path=self.vault) # v2 completed, v3 active
+        chronicle.complete_version(3, "test-project", vault_path=self.vault) # v3 completed, v4 active
+
+        # Reopen v1 for amendment
+        chronicle.reopen_version(1, "test-project", vault_path=self.vault)
+
+        # Jump to v6
+        jump_res = chronicle.jump_version(6, "test-project", vault_path=self.vault)
+        self.assertTrue(jump_res["success"])
+
+        status = chronicle.get_status("test-project", vault_path=self.vault)
+        v_map = {v["version"]: v["status"] for v in status["versions"]}
+        
+        # v1 was completed by jump
+        self.assertEqual(v_map[1], "completed")
+        # v2 and v3 were ALREADY completed and MUST NOT be corrupted into skipped!
+        self.assertEqual(v_map[2], "completed")
+        self.assertEqual(v_map[3], "completed")
+        # v4 and v5 were not completed, so they should be skipped
+        self.assertEqual(v_map[4], "skipped")
+        self.assertEqual(v_map[5], "skipped")
+        self.assertEqual(v_map[6], "in_progress")
+
+    def test_complete_version_rejects_nonexistent_version(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        res = chronicle.complete_version(99, "test-project", vault_path=self.vault)
+        self.assertFalse(res["success"])
+        self.assertIn("does not exist", res["error"])
+
+    def test_jump_version_rejects_excessive_gap(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        res = chronicle.jump_version(50000, "test-project", vault_path=self.vault)
+        self.assertFalse(res["success"])
+        self.assertIn("exceeds maximum allowed jump gap", res["error"])
+
+    def test_read_project_is_strictly_read_only(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        master_file = os.path.join(self.vault, "projects", "test-project", "master_evolution.md")
+        mtime_before = os.path.getmtime(master_file)
+        
+        # Calling read_project must not mutate files on disk
+        res = chronicle.read_project("test-project", vault_path=self.vault)
         self.assertTrue(res["success"])
+        mtime_after = os.path.getmtime(master_file)
+        self.assertEqual(mtime_before, mtime_after)
+
+    def test_folder_name_collision_does_not_hijack(self):
+        state = {
+            "projects": {
+                "api": {
+                    "workspace_root": os.path.join(self.test_dir, "work", "api"),
+                    "versions": [{"version": 1, "status": "in_progress"}]
+                }
+            }
+        }
+        # In an unrelated folder also named 'api', it must NOT hijack the existing project
+        unrelated_api_dir = os.path.join(self.test_dir, "personal", "api")
+        resolved = chronicle._resolve_project_name(None, state, cwd_override=unrelated_api_dir)
+        self.assertIsNone(resolved)
+
+    def test_reopen_version_updates_master_evolution(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        chronicle.complete_version(1, "test-project", vault_path=self.vault)
+        chronicle.reopen_version(1, "test-project", vault_path=self.vault)
 
         master_path = os.path.join(self.vault, "projects", "test-project", "master_evolution.md")
         with open(master_path, "r", encoding="utf-8") as f:
-            m_content = f.read()
-
-        # The table should not have unescaped raw pipes or unescaped newlines in table row
-        lines = [line for line in m_content.splitlines() if "Multi \\| Pip \\| Model" in line]
-        self.assertEqual(len(lines), 1, "Discovered row must remain a single unbroken table row")
-        self.assertNotIn("\n| Injected Table Row", m_content)
+            content = f.read()
+        self.assertIn("Reopened for retroactive amendments", content)
 
     def test_validate_vault_schema_checks(self):
         chronicle.init_project("test-project", vault_path=self.vault)

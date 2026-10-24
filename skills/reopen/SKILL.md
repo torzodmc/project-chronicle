@@ -20,7 +20,7 @@ Use this skill when you need to return to, edit, or add retroactive findings to 
 2. **Execute Reopen Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<plugin_dir>/scripts/chronicle_helper.py" reopen --version <N>
+   python "../../scripts/chronicle_helper.py" reopen --version <N>
    ```
 
 3. **Underlying Actions Performed:**
