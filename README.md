@@ -92,10 +92,10 @@ python scripts/chronicle_helper.py validate
 
 ## Vault Hierarchy
 
-By default, Project Chronicle stores project evolutions in a centralized vault at `~/.chronicles/` (configurable via `CHRONICLE_VAULT` environment variable, project-local `.chronicle` directory, or `--vault` flag):
+By default, Project Chronicle stores project evolutions in a centralized vault at `~/.chronicles/` (or a project-local `.chronicle/` directory in the repository root, configurable via `CHRONICLE_VAULT` environment variable or `--vault` flag):
 
 ```text
-chronicles/
+.chronicle/ (or ~/.chronicles/)
 ├── state.json                     # Atomic registry of active projects, workspace bindings, versions, and discoveries
 └── projects/
     └── <project_name>/

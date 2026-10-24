@@ -1,5 +1,5 @@
 ---
-name: chronicle-sync
+name: sync
 description: "Use when starting a new chat or synchronizing project context from the Project Chronicle vault. Hydrates the active session with living axioms, master evolution, active version dossier, and graveyard of traps."
 ---
 
@@ -17,7 +17,7 @@ Use this skill when starting a new chat session or resuming development on a tra
 1. **Locate Vault & Run Sync Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" sync
+   python "<plugin_dir>/scripts/chronicle_helper.py" sync
    ```
    *(If targeting a specific project: append `--project <name>`)*
 

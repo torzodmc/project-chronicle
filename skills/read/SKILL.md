@@ -1,5 +1,5 @@
 ---
-name: chronicle-read
+name: read
 description: "Use when you need complete project context, living axioms, and graveyard traps for side experiments, benchmarks, prototypes, or analysis WITHOUT being bound to or modifying versions."
 ---
 
@@ -28,7 +28,7 @@ When this skill is invoked:
 1. **Execute Read Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" read
+   python "<plugin_dir>/scripts/chronicle_helper.py" read
    ```
    *(If targeting a specific project: append `--project <name>`)*
 

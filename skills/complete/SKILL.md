@@ -1,5 +1,5 @@
 ---
-name: chronicle-complete
+name: complete
 description: "Use when sealing and completing the active chronicle version with verification evidence, automatically advancing the active pointer to the next version."
 ---
 
@@ -23,7 +23,7 @@ Before sealing a version, ensure:
 1. **Execute Complete Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" complete
+   python "<plugin_dir>/scripts/chronicle_helper.py" complete
    ```
    *(By default, this automatically seals the current active version. Optionally pass `--version <N>` to seal a specific version)*
 

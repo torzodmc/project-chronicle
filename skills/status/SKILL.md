@@ -1,5 +1,5 @@
 ---
-name: chronicle-status
+name: status
 description: "Use when checking current Project Chronicle state, active project, active version status, total versions, and historical timeline across all versions."
 ---
 
@@ -17,7 +17,7 @@ Use this skill to view the active project chronicle, current tracked version, co
 1. **Execute Status Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" status
+   python "<plugin_dir>/scripts/chronicle_helper.py" status
    ```
 
 2. **Display Chronicle Health & Timeline:**

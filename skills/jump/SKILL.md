@@ -1,5 +1,5 @@
 ---
-name: chronicle-jump
+name: jump
 description: "Use when skipping unchronicled versions or fast-forwarding to a specific target version number, cleanly marking intermediate versions as skipped."
 ---
 
@@ -21,7 +21,7 @@ Use this skill when development has progressed past multiple intermediate iterat
 2. **Execute Jump Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" jump --to <target_version>
+   python "<plugin_dir>/scripts/chronicle_helper.py" jump --to <target_version>
    ```
 
 3. **Underlying Actions Performed:**

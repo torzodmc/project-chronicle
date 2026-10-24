@@ -1,5 +1,5 @@
 ---
-name: chronicle-new
+name: new
 description: "Use when initializing a brand-new project chronicle division or starting a new tracked project."
 ---
 
@@ -21,7 +21,7 @@ Use this skill to initialize a new project chronicle division in the vault.
 2. **Execute Init Helper:**
    Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" init --project <project_name>
+   python "<plugin_dir>/scripts/chronicle_helper.py" init --project <project_name>
    ```
 
 3. **Confirm to User:**

@@ -266,8 +266,167 @@ class TestChronicleHelper(unittest.TestCase):
         # Explicit name takes priority
         self.assertEqual(chronicle._resolve_project_name("custom-name", state), "custom-name")
 
-        # Fallback when no match
-        self.assertEqual(chronicle._resolve_project_name(None, state), "default-proj")
+        # Untracked directory must return None, NOT leak active_project
+        self.assertIsNone(chronicle._resolve_project_name(None, state))
+
+    def test_complete_historical_version_when_all_sealed_advances(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        chronicle.complete_version(1, "test-project", vault_path=self.vault) # v1 completed, v2 active
+        chronicle.complete_version(2, "test-project", vault_path=self.vault) # v2 completed, v3 active
+        chronicle.complete_version(3, "test-project", vault_path=self.vault) # v3 completed, v4 active
+        
+        # Manually seal v4 so all recorded versions (1, 2, 3, 4) are completed
+        state_file = os.path.join(self.vault, "state.json")
+        with open(state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        for v in state["projects"]["test-project"]["versions"]:
+            v["status"] = "completed"
+        with open(state_file, "w", encoding="utf-8") as f:
+            json.dump(state, f)
+
+        # Now reopen v1 for an amendment
+        chronicle.reopen_version(1, "test-project", vault_path=self.vault)
+        status_reopen = chronicle.get_status("test-project", vault_path=self.vault)
+        self.assertEqual(status_reopen["active_version"], 1)
+
+        # Complete v1 again. Because all other versions (2, 3, 4) are completed,
+        # it must advance to 5 (max_v + 1), NOT get stuck on sealed version 4!
+        res = chronicle.complete_version(1, "test-project", vault_path=self.vault)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["next_active_version"], 5)
+
+        with open(state_file, "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertEqual(state["projects"]["test-project"]["active_version"], 5)
+        v5_path = os.path.join(self.vault, "projects", "test-project", "versions", "v5.md")
+        self.assertTrue(os.path.exists(v5_path))
+
+    def test_complete_version_updates_master_evolution(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        res = chronicle.complete_version(1, "test-project", vault_path=self.vault)
+        self.assertTrue(res["success"])
+
+        master_path = os.path.join(self.vault, "projects", "test-project", "master_evolution.md")
+        with open(master_path, "r", encoding="utf-8") as f:
+            m_content = f.read()
+
+        self.assertIn("## 5. Comprehensive Version Progression Log", m_content)
+        self.assertIn("- **Version 1**", m_content)
+        self.assertIn("Completed", m_content)
+
+    def test_sync_project_does_not_mutate_active_version(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        chronicle.complete_version(1, "test-project", vault_path=self.vault)
+        # Active version is now 2
+        status = chronicle.get_status("test-project", vault_path=self.vault)
+        self.assertEqual(status["active_version"], 2)
+
+        # Sync inspecting version 1 must NOT overwrite active_version in state.json
+        res = chronicle.sync_project("test-project", version=1, vault_path=self.vault)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["active_version"], 1)  # Inspection view
+
+        # State file must remain untouched at active_version 2
+        with open(os.path.join(self.vault, "state.json"), "r", encoding="utf-8") as f:
+            state = json.load(f)
+        self.assertEqual(state["projects"]["test-project"]["active_version"], 2)
+
+    def test_discover_sanitizes_markdown_table_injection(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        # Title and summary containing pipe characters and newlines
+        title_with_pipes = "Multi | Pip | Model"
+        summary_with_newlines = "First line of summary.\n| Injected Table Row | Fake Date |\nSecond line."
+        res = chronicle.discover_item(
+            title=title_with_pipes,
+            summary=summary_with_newlines,
+            project_name="test-project",
+            vault_path=self.vault
+        )
+        self.assertTrue(res["success"])
+
+        master_path = os.path.join(self.vault, "projects", "test-project", "master_evolution.md")
+        with open(master_path, "r", encoding="utf-8") as f:
+            m_content = f.read()
+
+        # The table should not have unescaped raw pipes or unescaped newlines in table row
+        lines = [line for line in m_content.splitlines() if "Multi \\| Pip \\| Model" in line]
+        self.assertEqual(len(lines), 1, "Discovered row must remain a single unbroken table row")
+        self.assertNotIn("\n| Injected Table Row", m_content)
+
+    def test_validate_vault_schema_checks(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        # Clean project validates
+        val = chronicle.validate_vault("test-project", vault_path=self.vault)
+        self.assertTrue(val["valid"])
+
+        # Corrupt master_evolution.md by removing Chapter 2
+        master_path = os.path.join(self.vault, "projects", "test-project", "master_evolution.md")
+        with open(master_path, "r", encoding="utf-8") as f:
+            m_content = f.read()
+        corrupt_m = m_content.replace("## 2. Core System Philosophy, Metaphors & Living Invariants", "## Core System Philosophy (Chapter 2 Removed)")
+        with open(master_path, "w", encoding="utf-8") as f:
+            f.write(corrupt_m)
+
+        val2 = chronicle.validate_vault("test-project", vault_path=self.vault)
+        self.assertFalse(val2["valid"])
+        self.assertTrue(any("Missing chapter 2" in err for err in val2["errors"]))
+
+    def test_vault_resolution_no_hardcoded_leak(self):
+        # Without CHRONICLE_VAULT and with no local .chronicle, resolves to ~/.chronicles
+        resolved = chronicle.resolve_vault_path()
+        self.assertNotIn("E:\\chronicles", resolved)
+        self.assertTrue(resolved.endswith(".chronicles") or resolved.endswith(".chronicle"))
+
+    def test_cli_read_includes_content_by_default(self):
+        import subprocess
+        chronicle.init_project("test-project", vault_path=self.vault)
+        helper_path = os.path.abspath(chronicle.__file__)
+
+        cmd = [
+            sys.executable,
+            helper_path,
+            "read",
+            "--vault", self.vault,
+            "--project", "test-project"
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0)
+        data = json.loads(proc.stdout)
+        self.assertIn("master_evolution_content", data)
+        self.assertIn("graveyard_content", data)
+        self.assertTrue(len(data["master_evolution_content"]) > 0)
+
+    def test_cli_status_human_formatting(self):
+        import subprocess
+        chronicle.init_project("test-project", vault_path=self.vault)
+        helper_path = os.path.abspath(chronicle.__file__)
+
+        cmd = [
+            sys.executable,
+            helper_path,
+            "status",
+            "--vault", self.vault,
+            "--project", "test-project",
+            "--human"
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("PROJECT CHRONICLE: test-project", proc.stdout)
+        self.assertIn("Active Version : Version 1", proc.stdout)
+
+    def test_validate_strict_mode_detects_placeholders(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        chronicle.complete_version(1, "test-project", vault_path=self.vault)
+        
+        # In non-strict mode, unreplaced placeholders in completed versions are warnings, not errors
+        val_normal = chronicle.validate_vault("test-project", vault_path=self.vault, strict=False)
+        self.assertTrue(val_normal["valid"])
+        self.assertTrue(len(val_normal["warnings"]) > 0)
+
+        # In strict mode, unreplaced placeholders fail validation
+        val_strict = chronicle.validate_vault("test-project", vault_path=self.vault, strict=True)
+        self.assertFalse(val_strict["valid"])
+        self.assertTrue(any("unreplaced placeholder" in err for err in val_strict["errors"]))
 
     def test_cli_complete_with_omitted_version(self):
         import subprocess

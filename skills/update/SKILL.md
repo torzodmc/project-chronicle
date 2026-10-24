@@ -1,5 +1,5 @@
 ---
-name: chronicle-update
+name: update
 description: "Use when capturing conversation debates, epistemic diffs, feature modifications, philosophy evolution, discoveries, and new failure traps into the active version dossier and master evolution."
 ---
 
@@ -73,7 +73,7 @@ If an idea, design pattern, or optimization failed or proved harmful, log it imm
 1. **Verify Current Status:**
    Run the status helper to confirm the active project and version:
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" status
+   python "<plugin_dir>/scripts/chronicle_helper.py" status
    ```
 
 2. **Clarify Ambiguities (if any):**
@@ -97,7 +97,7 @@ If an idea, design pattern, or optimization failed or proved harmful, log it imm
 
 6. **Validate State & Dossiers:**
    ```bash
-   python "<path_to_chronicle>/scripts/chronicle_helper.py" validate
+   python "<plugin_dir>/scripts/chronicle_helper.py" validate
    ```
 
 7. **Present Summary:**

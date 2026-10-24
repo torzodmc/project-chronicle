@@ -10,9 +10,11 @@ import os
 import sys
 import re
 import json
+import time
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
+from contextlib import contextmanager
 
 
 def _utc_now_iso():
@@ -31,7 +33,6 @@ def _slugify(text):
 
 
 DEFAULT_VAULT_NAME = ".chronicle"
-PRIMARY_DEDICATED_VAULT = r"E:\chronicles"
 
 
 def resolve_vault_path(vault_path=None):
@@ -42,14 +43,20 @@ def resolve_vault_path(vault_path=None):
     if "CHRONICLE_VAULT" in os.environ and os.environ["CHRONICLE_VAULT"].strip():
         return os.path.abspath(os.environ["CHRONICLE_VAULT"].strip())
 
-    # 2. Check local workspace or parents for .chronicle or chronicles folder
+    # 2. Check local workspace or parents for .chronicle, .chronicles, or chronicles folder
     try:
         curr = Path(os.getcwd()).resolve()
         for parent in [curr] + list(curr.parents):
-            for name in [DEFAULT_VAULT_NAME, "chronicles"]:
+            # Stop before drive/filesystem root (e.g. E:\ or /) to avoid root folder hijacking
+            if parent.parent == parent:
+                break
+            for name in [DEFAULT_VAULT_NAME, ".chronicles", "chronicles"]:
                 candidate = parent / name
                 if candidate.is_dir():
                     return str(candidate)
+            # Stop if we hit a version control root (.git)
+            if (parent / ".git").exists():
+                break
     except Exception:
         pass
 
@@ -58,12 +65,46 @@ def resolve_vault_path(vault_path=None):
     if home_vault.is_dir():
         return str(home_vault)
 
-    # 4. Backward compatibility: if E:\chronicles already exists on disk, preserve it
-    if os.path.exists(PRIMARY_DEDICATED_VAULT):
-        return PRIMARY_DEDICATED_VAULT
-
-    # 5. Default to centralized ~/.chronicles
+    # 4. Default to centralized ~/.chronicles
     return str(home_vault)
+
+
+@contextmanager
+def _vault_lock(vault, timeout=5.0):
+    """
+    Cross-platform atomic advisory lock for vault operations using OS atomic file creation.
+    Handles stale locks older than 10 seconds.
+    """
+    os.makedirs(vault, exist_ok=True)
+    lock_file = os.path.join(vault, ".state.lock")
+    start = time.time()
+    fd = None
+    acquired = False
+    while time.time() - start < timeout:
+        try:
+            fd = os.open(lock_file, os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            acquired = True
+            break
+        except FileExistsError:
+            try:
+                mtime = os.path.getmtime(lock_file)
+                if time.time() - mtime > 10.0:
+                    try:
+                        os.remove(lock_file)
+                    except OSError:
+                        pass
+            except OSError:
+                pass
+            time.sleep(0.05)
+    try:
+        yield acquired
+    finally:
+        if acquired and fd is not None:
+            try:
+                os.close(fd)
+                os.remove(lock_file)
+            except OSError:
+                pass
 
 
 def _load_state(vault):
@@ -97,12 +138,22 @@ def _save_state(vault, state):
     os.makedirs(vault, exist_ok=True)
     state["last_updated"] = _utc_now_iso()
     state_file = os.path.join(vault, "state.json")
-    tmp_file = f"{state_file}.{os.getpid()}.tmp"
+    tmp_file = f"{state_file}.{os.getpid()}.{time.time_ns()}.tmp"
     with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp_file, state_file)
+
+    # Retry loop with exponential backoff for Windows file locking contention (antivirus, indexers)
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            os.replace(tmp_file, state_file)
+            break
+        except PermissionError:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(0.05 * (2 ** attempt))
 
 
 def _resolve_project_name(project_name, state):
@@ -111,7 +162,7 @@ def _resolve_project_name(project_name, state):
     1. Explicit project_name passed by user/caller.
     2. Match a registered project whose workspace_root equals or is an ancestor of CWD.
     3. Match a registered project whose name matches slugified CWD folder name.
-    4. Fallback to state['active_project'].
+    If no match is found, returns None to prevent cross-workspace pollution.
     """
     if project_name and str(project_name).strip():
         return _slugify(str(project_name).strip())
@@ -147,8 +198,8 @@ def _resolve_project_name(project_name, state):
     except Exception:
         pass
 
-    # 4. Fallback to active_project
-    return state.get("active_project")
+    # No match found in current directory - do NOT leak active_project across workspaces
+    return None
 
 
 def _generate_v_template(version_num, title=None):
@@ -440,7 +491,7 @@ def init_project(project_name=None, vault_path=None):
     }
 
 
-def get_status(project_name=None, vault_path=None):
+def get_status(project_name=None, vault_path=None, target_version=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
     pname = _resolve_project_name(project_name, state)
@@ -459,7 +510,11 @@ def get_status(project_name=None, vault_path=None):
         }
         
     pdata = state["projects"][pname]
-    active_v = pdata.get("active_version", 1)
+    if target_version is not None:
+        active_v = int(target_version)
+    else:
+        active_v = pdata.get("active_version", 1)
+
     v_entry = next((v for v in pdata.get("versions", []) if v["version"] == active_v), None)
     v_status = v_entry["status"] if v_entry else "unknown"
     discoveries = pdata.get("discoveries", [])
@@ -487,7 +542,7 @@ def sync_project(project_name=None, version=None, vault_path=None):
             "error": "No active project in vault. Run /chronicle:new to start tracking."
         }
         
-    state["active_project"] = pname
+    v_num = None
     if version is not None:
         v_num = int(version)
         known_versions = [v["version"] for v in state["projects"][pname].get("versions", [])]
@@ -496,15 +551,16 @@ def sync_project(project_name=None, version=None, vault_path=None):
                 "success": False,
                 "error": f"Version {v_num} does not exist in project '{pname}'. Known versions: {known_versions}. Use /chronicle:jump to fast-forward."
             }
-        state["projects"][pname]["active_version"] = v_num
         
-    _save_state(vault, state)
+    if state.get("active_project") != pname:
+        state["active_project"] = pname
+        _save_state(vault, state)
 
     project_dir = os.path.join(vault, "projects", pname)
     master_file = os.path.join(project_dir, "master_evolution.md")
     _ensure_6_chapter_master(master_file, pname)
 
-    return get_status(pname, vault_path=vault)
+    return get_status(pname, vault_path=vault, target_version=v_num)
 
 
 def read_project(project_name=None, vault_path=None, include_content=True):
@@ -555,6 +611,36 @@ def read_project(project_name=None, vault_path=None, include_content=True):
     return res
 
 
+def _append_progression_log(master_file, log_entries):
+    if not os.path.exists(master_file) or not log_entries:
+        return
+    with open(master_file, "r", encoding="utf-8") as f:
+        m_content = f.read()
+
+    log_text = "\n".join(log_entries) + "\n"
+
+    if "## 5. Comprehensive Version Progression Log" in m_content:
+        parts = m_content.split("## 5. Comprehensive Version Progression Log", 1)
+        prefix = parts[0] + "## 5. Comprehensive Version Progression Log\n"
+        suffix = parts[1]
+        if "## 6. Discoveries & Research Catalog" in suffix:
+            ch5_body, ch6_body = suffix.split("## 6. Discoveries & Research Catalog", 1)
+            clean_ch5 = re.sub(r'(?:\r?\n)*---\s*$', '', ch5_body.rstrip())
+            m_content = prefix + clean_ch5.rstrip() + "\n" + log_text + "\n---\n\n## 6. Discoveries & Research Catalog" + ch6_body
+        else:
+            clean_ch5 = re.sub(r'(?:\r?\n)*---\s*$', '', suffix.rstrip())
+            m_content = prefix + clean_ch5.rstrip() + "\n" + log_text
+    elif "## 3. Comprehensive Version Progression Log" in m_content:
+        parts = m_content.split("## 3. Comprehensive Version Progression Log", 1)
+        clean_ch3 = re.sub(r'(?:\r?\n)*---\s*$', '', parts[1].rstrip())
+        m_content = parts[0] + "## 3. Comprehensive Version Progression Log\n" + clean_ch3.rstrip() + "\n" + log_text
+    else:
+        m_content += f"\n\n---\n\n## 5. Comprehensive Version Progression Log\n{log_text}\n"
+
+    with open(master_file, "w", encoding="utf-8") as f:
+        f.write(m_content)
+
+
 def discover_item(title, asset_path=None, summary=None, project_name=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
@@ -602,9 +688,11 @@ def discover_item(title, asset_path=None, summary=None, project_name=None, vault
         with open(master_file, "r", encoding="utf-8") as f:
             m_content = f.read()
             
-        summary_str = summary if summary else "Breakthrough asset / experimental finding"
-        asset_str = f"`{asset_path}`" if asset_path else "See discovery dossier"
-        row = f"| [{title}]({rel_file}) | {_utc_now_date()} | {asset_str} | {summary_str} |\n"
+        clean_title = re.sub(r'[\r\n]+', ' ', title).replace('|', '\\|').strip()
+        clean_summary = re.sub(r'[\r\n]+', ' ', summary if summary else "Breakthrough asset / experimental finding").replace('|', '\\|').strip()
+        clean_asset = re.sub(r'[\r\n]+', ' ', asset_path).replace('|', '\\|').strip() if asset_path else None
+        asset_str = f"`{clean_asset}`" if clean_asset else "See discovery dossier"
+        row = f"| [{clean_title}]({rel_file}) | {_utc_now_date()} | {asset_str} | {clean_summary} |\n"
         
         cat_header = "## 6. Discoveries & Research Catalog"
         if cat_header in m_content:
@@ -669,9 +757,25 @@ def complete_version(version=None, project_name=None, vault_path=None):
 
     if v_num < max_v:
         # Completing a reopened historical version (e.g. V2 while project is at V5)
-        highest_in_prog = next((v["version"] for v in reversed(recorded_versions) if v.get("status") == "in_progress"), max_v)
-        pdata["active_version"] = highest_in_prog
-        next_v = highest_in_prog
+        highest_in_prog = next((v["version"] for v in reversed(recorded_versions) if v.get("status") == "in_progress"), None)
+        if highest_in_prog is not None:
+            pdata["active_version"] = highest_in_prog
+            next_v = highest_in_prog
+        else:
+            # All recorded milestones up to max_v are completed or skipped! Advance to max_v + 1
+            next_v = max_v + 1
+            pdata["versions"].append({
+                "version": next_v,
+                "title": f"Milestone {next_v}",
+                "file": f"versions/v{next_v}.md",
+                "status": "in_progress",
+                "created_at": _utc_now_iso()
+            })
+            pdata["active_version"] = next_v
+            next_file = os.path.join(vault, "projects", pname, "versions", f"v{next_v}.md")
+            if not os.path.exists(next_file):
+                with open(next_file, "w", encoding="utf-8") as f:
+                    f.write(_generate_v_template(next_v))
     else:
         # Normal sequential progression: V_N completed, advance to V_{N+1}
         next_v = v_num + 1
@@ -697,6 +801,13 @@ def complete_version(version=None, project_name=None, vault_path=None):
                 f.write(_generate_v_template(next_v))
 
     _save_state(vault, state)
+
+    # Append completion entry to master_evolution.md Chapter 5
+    master_file = os.path.join(vault, "projects", pname, "master_evolution.md")
+    if os.path.exists(master_file):
+        _ensure_6_chapter_master(master_file, pname)
+        comp_log = f"- **Version {v_num}** ({_utc_now_date()}): Completed. (Active development advanced to Version {next_v})."
+        _append_progression_log(master_file, [comp_log])
 
     return {
         "success": True,
@@ -788,37 +899,11 @@ def jump_version(target_version, project_name=None, vault_path=None):
     master_file = os.path.join(vault, "projects", pname, "master_evolution.md")
     if os.path.exists(master_file):
         _ensure_6_chapter_master(master_file, pname)
-        
-        with open(master_file, "r", encoding="utf-8") as f:
-            m_content = f.read()
-            
         log_entries = []
         for sv in skipped_versions:
             log_entries.append(f"- **Version {sv}**: Skipped / Unchronicled milestone (Fast-forwarded to Version {target_v}).")
         log_entries.append(f"- **Version {target_v}** ({_utc_now_date()}): In progress.")
-        
-        log_text = "\n".join(log_entries) + "\n"
-        
-        if "## 5. Comprehensive Version Progression Log" in m_content:
-            parts = m_content.split("## 5. Comprehensive Version Progression Log", 1)
-            prefix = parts[0] + "## 5. Comprehensive Version Progression Log\n"
-            suffix = parts[1]
-            if "## 6. Discoveries & Research Catalog" in suffix:
-                ch5_body, ch6_body = suffix.split("## 6. Discoveries & Research Catalog", 1)
-                clean_ch5 = re.sub(r'(?:\r?\n)*---\s*$', '', ch5_body.rstrip())
-                m_content = prefix + clean_ch5.rstrip() + "\n" + log_text + "\n---\n\n## 6. Discoveries & Research Catalog" + ch6_body
-            else:
-                clean_ch5 = re.sub(r'(?:\r?\n)*---\s*$', '', suffix.rstrip())
-                m_content = prefix + clean_ch5.rstrip() + "\n" + log_text
-        elif "## 3. Comprehensive Version Progression Log" in m_content:
-            parts = m_content.split("## 3. Comprehensive Version Progression Log", 1)
-            clean_ch3 = re.sub(r'(?:\r?\n)*---\s*$', '', parts[1].rstrip())
-            m_content = parts[0] + "## 3. Comprehensive Version Progression Log\n" + clean_ch3.rstrip() + "\n" + log_text
-        else:
-            m_content += f"\n\n---\n\n## 5. Comprehensive Version Progression Log\n{log_text}\n"
-            
-        with open(master_file, "w", encoding="utf-8") as f:
-            f.write(m_content)
+        _append_progression_log(master_file, log_entries)
             
     return {
         "success": True,
@@ -870,13 +955,14 @@ def reopen_version(version, project_name=None, vault_path=None):
     }
 
 
-def validate_vault(project_name=None, vault_path=None):
+def validate_vault(project_name=None, vault_path=None, strict=False):
     vault = resolve_vault_path(vault_path)
     state_file = os.path.join(vault, "state.json")
     if not os.path.exists(state_file):
         return {
             "valid": False,
-            "errors": [f"Missing state file: {state_file}"]
+            "errors": [f"Missing state file: {state_file}"],
+            "warnings": []
         }
 
     try:
@@ -884,30 +970,41 @@ def validate_vault(project_name=None, vault_path=None):
     except Exception as exc:
         return {
             "valid": False,
-            "errors": [f"Corrupt state file: {exc}"]
+            "errors": [f"Corrupt state file: {exc}"],
+            "warnings": []
         }
 
     errors = []
+    warnings = []
     pname = _resolve_project_name(project_name, state)
     if not pname:
         return {
             "valid": True,
             "errors": [],
+            "warnings": [],
             "message": "Vault is clean. No active projects currently tracked."
         }
         
     if pname not in state.get("projects", {}):
         errors.append(f"Project '{pname}' declared active but missing from projects registry")
-        return {"valid": False, "errors": errors}
+        return {"valid": False, "errors": errors, "warnings": warnings}
         
     project_dir = os.path.join(vault, "projects", pname)
     if not os.path.isdir(project_dir):
         errors.append(f"Missing project directory: {project_dir}")
-        return {"valid": False, "errors": errors}
+        return {"valid": False, "errors": errors, "warnings": warnings}
         
     master_file = os.path.join(project_dir, "master_evolution.md")
     if not os.path.exists(master_file):
         errors.append(f"Missing master_evolution.md in {project_dir}")
+    else:
+        # Schema validation: check all 6 chapters exist in master_evolution.md
+        with open(master_file, "r", encoding="utf-8") as f:
+            m_text = f.read()
+        for ch_num in range(1, 7):
+            pattern = r"(?m)^#{1,3}\s+" + str(ch_num) + r"\.\s+"
+            if not re.search(pattern, m_text):
+                errors.append(f"Missing chapter {ch_num} in master_evolution.md for project '{pname}'")
         
     graveyard_file = os.path.join(project_dir, "graveyard_of_traps.md")
     if not os.path.exists(graveyard_file):
@@ -924,16 +1021,38 @@ def validate_vault(project_name=None, vault_path=None):
             vfile = os.path.join(versions_dir, f"v{vnum}.md")
             if not os.path.exists(vfile):
                 errors.append(f"Missing version dossier {vfile}")
+            else:
+                with open(vfile, "r", encoding="utf-8") as f:
+                    v_text = f.read()
+                # Schema validation: check all 6 sections exist in v<N>.md
+                for s_num in range(1, 7):
+                    pattern = r"(?m)^#{2,3}\s+" + str(s_num) + r"\.\s+"
+                    if not re.search(pattern, v_text):
+                        errors.append(f"Missing section {s_num} in version dossier {vfile}")
+                # Check for unsealed placeholders in completed versions
+                if ventry.get("status") == "completed":
+                    if "[Commands run, test outputs" in v_text or "[What previously held theory was broken?]" in v_text:
+                        msg = f"Version dossier {vfile} is marked completed but contains unreplaced placeholder template text"
+                        if strict:
+                            errors.append(msg)
+                        else:
+                            warnings.append(msg)
 
     # Validate discoveries if present
     for dentry in state["projects"][pname].get("discoveries", []):
         dfile = os.path.join(vault, "projects", pname, dentry.get("file", ""))
         if not os.path.exists(dfile):
             errors.append(f"Missing discovery dossier {dfile}")
+        else:
+            with open(dfile, "r", encoding="utf-8") as f:
+                d_text = f.read()
+            if not re.search(r'(?m)^## 1\.\s+', d_text) or not re.search(r'(?m)^## 2\.\s+', d_text):
+                errors.append(f"Missing required sections in discovery dossier {dfile}")
 
     return {
         "valid": len(errors) == 0,
-        "errors": errors
+        "errors": errors,
+        "warnings": warnings
     }
 
 
@@ -954,6 +1073,7 @@ def main():
     p_status = subparsers.add_parser("status", help="Get chronicle status")
     p_status.add_argument("--project", help="Project name (defaults to active)")
     p_status.add_argument("--vault", help="Custom vault path")
+    p_status.add_argument("--human", action="store_true", help="Print human-readable terminal summary")
 
     # sync
     p_sync = subparsers.add_parser("sync", help="Synchronize active project/version")
@@ -965,6 +1085,7 @@ def main():
     p_read = subparsers.add_parser("read", help="Hydrate complete project context in read-only observer mode without version binding")
     p_read.add_argument("--project", help="Project name (defaults to active project)")
     p_read.add_argument("--vault", help="Custom vault path")
+    p_read.add_argument("--no-content", dest="include_content", action="store_false", default=True, help="Omit file contents in output")
 
     # discover
     p_discover = subparsers.add_parser("discover", help="Record an experimental discovery or breakthrough")
@@ -996,6 +1117,7 @@ def main():
     p_validate = subparsers.add_parser("validate", help="Validate schemas and state integrity")
     p_validate.add_argument("--project", help="Project name")
     p_validate.add_argument("--vault", help="Custom vault path")
+    p_validate.add_argument("--strict", action="store_true", help="Fail validation on unreplaced template placeholders")
 
     args = parser.parse_args()
 
@@ -1004,12 +1126,31 @@ def main():
         print(json.dumps(res, indent=2))
     elif args.command == "status":
         res = get_status(args.project, args.vault)
-        print(json.dumps(res, indent=2))
+        if getattr(args, "human", False):
+            if not res.get("project_name"):
+                print("No active project currently tracked. Run /chronicle:new to start.")
+            else:
+                pname = res['project_name']
+                print("=" * 60)
+                print(f"  PROJECT CHRONICLE: {pname}")
+                print("=" * 60)
+                print(f"  Active Version : Version {res['active_version']} ({res['version_status']})")
+                print(f"  Vault Location : {res['vault_path']}")
+                print(f"  Total Versions : {res['total_versions']}")
+                print(f"  Discoveries    : {res['total_discoveries']}")
+                print("-" * 60)
+                print("  Milestones:")
+                for v in res.get("versions", []):
+                    mark = " *" if v["version"] == res["active_version"] else ""
+                    print(f"    - Version {v['version']}: {v.get('title', '')} [{v.get('status', 'unknown')}]{mark}")
+                print("=" * 60)
+        else:
+            print(json.dumps(res, indent=2))
     elif args.command == "sync":
         res = sync_project(args.project, args.version, args.vault)
         print(json.dumps(res, indent=2))
     elif args.command == "read":
-        res = read_project(args.project, args.vault, include_content=False)
+        res = read_project(args.project, args.vault, include_content=args.include_content)
         print(json.dumps(res, indent=2))
     elif args.command == "discover":
         res = discover_item(args.title, args.asset_path, args.summary, args.project, args.vault)
@@ -1024,7 +1165,7 @@ def main():
         res = reopen_version(args.version, args.project, args.vault)
         print(json.dumps(res, indent=2))
     elif args.command == "validate":
-        res = validate_vault(args.project, args.vault)
+        res = validate_vault(args.project, args.vault, strict=getattr(args, "strict", False))
         print(json.dumps(res, indent=2))
 
 
