@@ -38,28 +38,32 @@ def resolve_vault_path(vault_path=None):
     if vault_path:
         return os.path.abspath(vault_path)
     
-    # Check environment variable CHRONICLE_VAULT
+    # 1. Environment variable CHRONICLE_VAULT
     if "CHRONICLE_VAULT" in os.environ and os.environ["CHRONICLE_VAULT"].strip():
         return os.path.abspath(os.environ["CHRONICLE_VAULT"].strip())
 
-    # Dedicated root vault check on E:
+    # 2. Check local workspace or parents for .chronicle or chronicles folder
+    try:
+        curr = Path(os.getcwd()).resolve()
+        for parent in [curr] + list(curr.parents):
+            for name in [DEFAULT_VAULT_NAME, "chronicles"]:
+                candidate = parent / name
+                if candidate.is_dir():
+                    return str(candidate)
+    except Exception:
+        pass
+
+    # 3. Check if standard ~/.chronicles exists
+    home_vault = Path.home() / ".chronicles"
+    if home_vault.is_dir():
+        return str(home_vault)
+
+    # 4. Backward compatibility: if E:\chronicles already exists on disk, preserve it
     if os.path.exists(PRIMARY_DEDICATED_VAULT):
         return PRIMARY_DEDICATED_VAULT
 
-    # Walk up from current working directory to find an existing .chronicle or chronicles directory
-    curr = Path(os.getcwd()).resolve()
-    for parent in [curr] + list(curr.parents):
-        for name in [DEFAULT_VAULT_NAME, "chronicles"]:
-            candidate = parent / name
-            if candidate.is_dir():
-                return str(candidate)
-
-    # If on Windows and drive E: exists, default to E:\chronicles
-    if os.name == "nt" and os.path.exists(r"E:\\"):
-        return PRIMARY_DEDICATED_VAULT
-            
-    # Default to .chronicle in CWD
-    return os.path.abspath(DEFAULT_VAULT_NAME)
+    # 5. Default to centralized ~/.chronicles
+    return str(home_vault)
 
 
 def _load_state(vault):
@@ -74,33 +78,17 @@ def _load_state(vault):
     try:
         with open(state_file, "r", encoding="utf-8") as f:
             state = json.load(f)
-    except Exception:
-        return {
-            "created_at": _utc_now_iso(),
-            "last_updated": _utc_now_iso(),
-            "active_project": None,
-            "projects": {}
-        }
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to parse state file at '{state_file}'. "
+            f"The file may be corrupted or locked. Error: {exc}"
+        )
 
-    # Self-healing: auto-prune any project whose directory was deleted on disk
-    projects_dir = os.path.join(vault, "projects")
-    pruned = False
-    valid_projects = {}
-    for pname, pdata in state.get("projects", {}).items():
-        pdir = os.path.join(projects_dir, pname)
-        if os.path.isdir(pdir):
-            valid_projects[pname] = pdata
-        else:
-            pruned = True
+    if not isinstance(state, dict):
+        raise RuntimeError(f"Corrupt state file: root object must be a dictionary in '{state_file}'")
 
-    state["projects"] = valid_projects
-    active = state.get("active_project")
-    if active and active not in valid_projects:
-        state["active_project"] = list(valid_projects.keys())[0] if valid_projects else None
-        pruned = True
-
-    if pruned:
-        _save_state(vault, state)
+    if "projects" not in state or not isinstance(state["projects"], dict):
+        state["projects"] = {}
 
     return state
 
@@ -109,8 +97,58 @@ def _save_state(vault, state):
     os.makedirs(vault, exist_ok=True)
     state["last_updated"] = _utc_now_iso()
     state_file = os.path.join(vault, "state.json")
-    with open(state_file, "w", encoding="utf-8") as f:
+    tmp_file = state_file + ".tmp"
+    with open(tmp_file, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_file, state_file)
+
+
+def _resolve_project_name(project_name, state):
+    """
+    Deterministically resolves which project to target:
+    1. Explicit project_name passed by user/caller.
+    2. Match a registered project whose workspace_root equals or is an ancestor of CWD.
+    3. Match a registered project whose name matches slugified CWD folder name.
+    4. Fallback to state['active_project'].
+    """
+    if project_name and str(project_name).strip():
+        return _slugify(str(project_name).strip())
+        
+    projects = state.get("projects", {})
+    if not projects:
+        return None
+
+    try:
+        cwd_resolved = str(Path.cwd().resolve())
+        cwd_slug = _slugify(Path.cwd().name)
+
+        # 2. Check workspace_root match
+        best_match = None
+        best_len = 0
+        for pname, pdata in projects.items():
+            w_root = pdata.get("workspace_root")
+            if w_root:
+                try:
+                    rel = os.path.relpath(cwd_resolved, w_root)
+                    if not rel.startswith("..") and not rel.startswith("/") and not rel.startswith("\\"):
+                        if len(w_root) > best_len:
+                            best_match = pname
+                            best_len = len(w_root)
+                except ValueError:
+                    pass
+        if best_match:
+            return best_match
+
+        # 3. Check if folder name matches a project
+        if cwd_slug in projects:
+            return cwd_slug
+    except Exception:
+        pass
+
+    # 4. Fallback to active_project
+    return state.get("active_project")
 
 
 def _generate_v_template(version_num, title=None):
@@ -266,15 +304,14 @@ def _generate_graveyard_template(project_name):
 """
 
 
-def _ensure_5_chapter_master(master_file, project_name):
-    """Upgrades a legacy 3-section master_evolution.md to the rich format non-destructively."""
+def _ensure_6_chapter_master(master_file, project_name):
+    """Upgrades a legacy master_evolution.md to the rich 6-chapter format non-destructively."""
     if not os.path.exists(master_file):
         return
     with open(master_file, "r", encoding="utf-8") as f:
         content = f.read()
         
     if "## 1. Foundational Intent & Origin Thesis" in content:
-        # Check if Chapter 6 Discoveries is missing
         if "## 6. Discoveries & Research Catalog" not in content:
             content = content.rstrip() + "\n\n---\n\n## 6. Discoveries & Research Catalog\n| Discovery | Date | Primary Asset Location | Breakthrough Edge & Summary |\n|---|---|---|---|\n| (No discoveries logged yet. Run /chronicle:discover to record findings) | - | - | - |\n"
             with open(master_file, "w", encoding="utf-8") as f:
@@ -355,7 +392,6 @@ def init_project(project_name=None, vault_path=None):
     os.makedirs(versions_dir, exist_ok=True)
     os.makedirs(discoveries_dir, exist_ok=True)
     
-    # Initialize templates if missing
     master_file = os.path.join(project_dir, "master_evolution.md")
     if not os.path.exists(master_file):
         with open(master_file, "w", encoding="utf-8") as f:
@@ -371,9 +407,11 @@ def init_project(project_name=None, vault_path=None):
         with open(v1_file, "w", encoding="utf-8") as f:
             f.write(_generate_v_template(1, "Foundation & Initial Architecture"))
 
+    cwd_root = str(Path.cwd().resolve())
     if project_name not in state["projects"]:
         state["projects"][project_name] = {
             "created_at": _utc_now_iso(),
+            "workspace_root": cwd_root,
             "active_version": 1,
             "versions": [
                 {
@@ -386,6 +424,8 @@ def init_project(project_name=None, vault_path=None):
             ],
             "discoveries": []
         }
+    else:
+        state["projects"][project_name]["workspace_root"] = cwd_root
     
     state["active_project"] = project_name
     _save_state(vault, state)
@@ -403,7 +443,7 @@ def init_project(project_name=None, vault_path=None):
 def get_status(project_name=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
-    pname = project_name if project_name else state.get("active_project")
+    pname = _resolve_project_name(project_name, state)
     if not pname or pname not in state.get("projects", {}):
         return {
             "success": True,
@@ -440,7 +480,7 @@ def get_status(project_name=None, vault_path=None):
 def sync_project(project_name=None, version=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
-    pname = project_name if project_name else state.get("active_project")
+    pname = _resolve_project_name(project_name, state)
     if not pname or pname not in state.get("projects", {}):
         return {
             "success": False,
@@ -456,10 +496,10 @@ def sync_project(project_name=None, version=None, vault_path=None):
     return get_status(pname, vault_path=vault)
 
 
-def read_project(project_name=None, vault_path=None):
+def read_project(project_name=None, vault_path=None, include_content=True):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
-    pname = project_name if project_name else state.get("active_project")
+    pname = _resolve_project_name(project_name, state)
     if not pname or pname not in state.get("projects", {}):
         return {
             "success": False,
@@ -471,20 +511,20 @@ def read_project(project_name=None, vault_path=None):
     graveyard_file = os.path.join(project_dir, "graveyard_of_traps.md")
     
     master_content = ""
-    if os.path.exists(master_file):
-        with open(master_file, "r", encoding="utf-8") as f:
-            master_content = f.read()
-            
     graveyard_content = ""
-    if os.path.exists(graveyard_file):
-        with open(graveyard_file, "r", encoding="utf-8") as f:
-            graveyard_content = f.read()
+    if include_content:
+        if os.path.exists(master_file):
+            with open(master_file, "r", encoding="utf-8") as f:
+                master_content = f.read()
+        if os.path.exists(graveyard_file):
+            with open(graveyard_file, "r", encoding="utf-8") as f:
+                graveyard_content = f.read()
             
     pdata = state["projects"][pname]
     active_v = pdata.get("active_version", 1)
     discoveries = pdata.get("discoveries", [])
     
-    return {
+    res = {
         "success": True,
         "mode": "read_only_observer",
         "project_name": pname,
@@ -495,16 +535,18 @@ def read_project(project_name=None, vault_path=None):
         "discoveries": discoveries,
         "master_evolution_path": master_file,
         "graveyard_path": graveyard_file,
-        "master_evolution_content": master_content,
-        "graveyard_content": graveyard_content,
         "observer_directive": f"You are in Read-Only Observer Mode for project '{pname}'. You have complete architectural, philosophical, and risk context in memory to assist with side tasks, experiments, benchmarks, prototypes, or analysis. You are NOT authoring a version milestone and must NOT increment versions or run /chronicle:update. If an independent breakthrough or reusable asset is created, catalog it using /chronicle:discover."
     }
+    if include_content:
+        res["master_evolution_content"] = master_content
+        res["graveyard_content"] = graveyard_content
+    return res
 
 
 def discover_item(title, asset_path=None, summary=None, project_name=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
-    pname = project_name if project_name else state.get("active_project")
+    pname = _resolve_project_name(project_name, state)
     if not pname or pname not in state.get("projects", {}):
         return {
             "success": False,
@@ -548,15 +590,15 @@ def discover_item(title, asset_path=None, summary=None, project_name=None, vault
         with open(master_file, "r", encoding="utf-8") as f:
             m_content = f.read()
             
-        summary_str = summary if summary else "Experimental research finding"
+        summary_str = summary if summary else "Breakthrough asset / experimental finding"
         asset_str = f"`{asset_path}`" if asset_path else "See discovery dossier"
         row = f"| [{title}]({rel_file}) | {_utc_now_date()} | {asset_str} | {summary_str} |\n"
         
         cat_header = "## 6. Discoveries & Research Catalog"
         if cat_header in m_content:
             parts = m_content.split(cat_header)
-            # Replace placeholder row if present
-            post_header = parts[1].replace("| (No discoveries logged yet. Run /chronicle:discover to record findings) | - | - | - |\n", "")
+            # Replace placeholder row if present (robust against CRLF and whitespace)
+            post_header = re.sub(r'\|\s*\(No discoveries logged yet[^\r\n]*\|\s*-\s*\|\s*-\s*\|\s*-\s*\|\r?\n', '', parts[1])
             m_content = parts[0] + cat_header + post_header.rstrip() + "\n" + row
         else:
             m_content = m_content.rstrip() + f"\n\n---\n\n{cat_header}\n\n| Discovery | Date | Primary Asset Location | Breakthrough Edge & Summary |\n|---|---|---|---|\n{row}\n"
@@ -574,15 +616,18 @@ def discover_item(title, asset_path=None, summary=None, project_name=None, vault
     }
 
 
-def complete_version(version, project_name=None, vault_path=None):
+def complete_version(version=None, project_name=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
-    pname = project_name if project_name else state.get("active_project")
+    pname = _resolve_project_name(project_name, state)
     if not pname or pname not in state.get("projects", {}):
         return {"success": False, "error": f"Project '{pname}' not found"}
         
     pdata = state["projects"][pname]
-    v_num = int(version)
+    if version is None:
+        v_num = pdata.get("active_version", 1)
+    else:
+        v_num = int(version)
     
     # Mark target version as completed
     v_entry = next((v for v in pdata.get("versions", []) if v["version"] == v_num), None)
@@ -598,12 +643,12 @@ def complete_version(version, project_name=None, vault_path=None):
             "completed_at": _utc_now_iso()
         })
         
-    # Update file header on disk if present
+    # Update file header on disk if present using safe targeted regex
     v_file = os.path.join(vault, "projects", pname, "versions", f"v{v_num}.md")
     if os.path.exists(v_file):
         with open(v_file, "r", encoding="utf-8") as f:
             content = f.read()
-        content = content.replace("**Status:** in_progress", "**Status:** completed")
+        content = re.sub(r'(?m)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*in_progress\s*$', r'**Status:** completed', content)
         with open(v_file, "w", encoding="utf-8") as f:
             f.write(content)
 
@@ -640,7 +685,7 @@ def complete_version(version, project_name=None, vault_path=None):
 def jump_version(target_version, project_name=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
-    pname = project_name if project_name else state.get("active_project")
+    pname = _resolve_project_name(project_name, state)
     if not pname or pname not in state.get("projects", {}):
         return {"success": False, "error": "No active project found in vault. Run /chronicle:new first."}
         
@@ -672,7 +717,7 @@ def jump_version(target_version, project_name=None, vault_path=None):
         if os.path.exists(curr_file):
             with open(curr_file, "r", encoding="utf-8") as f:
                 content = f.read()
-            content = content.replace("**Status:** in_progress", "**Status:** completed")
+            content = re.sub(r'(?m)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*in_progress\s*$', r'**Status:** completed', content)
             with open(curr_file, "w", encoding="utf-8") as f:
                 f.write(content)
                 
@@ -719,7 +764,7 @@ def jump_version(target_version, project_name=None, vault_path=None):
     # 5. Append skipped milestones and target milestone to master_evolution.md
     master_file = os.path.join(vault, "projects", pname, "master_evolution.md")
     if os.path.exists(master_file):
-        _ensure_5_chapter_master(master_file, pname)
+        _ensure_6_chapter_master(master_file, pname)
         
         with open(master_file, "r", encoding="utf-8") as f:
             m_content = f.read()
@@ -732,10 +777,16 @@ def jump_version(target_version, project_name=None, vault_path=None):
         log_text = "\n".join(log_entries) + "\n"
         
         if "## 5. Comprehensive Version Progression Log" in m_content:
-            parts = m_content.split("## 5. Comprehensive Version Progression Log")
-            m_content = parts[0] + "## 5. Comprehensive Version Progression Log\n" + parts[1].rstrip() + "\n" + log_text
+            parts = m_content.split("## 5. Comprehensive Version Progression Log", 1)
+            prefix = parts[0] + "## 5. Comprehensive Version Progression Log\n"
+            suffix = parts[1]
+            if "## 6. Discoveries & Research Catalog" in suffix:
+                ch5_body, ch6_body = suffix.split("## 6. Discoveries & Research Catalog", 1)
+                m_content = prefix + ch5_body.rstrip() + "\n" + log_text + "\n---\n\n## 6. Discoveries & Research Catalog" + ch6_body
+            else:
+                m_content = prefix + suffix.rstrip() + "\n" + log_text
         elif "## 3. Comprehensive Version Progression Log" in m_content:
-            parts = m_content.split("## 3. Comprehensive Version Progression Log")
+            parts = m_content.split("## 3. Comprehensive Version Progression Log", 1)
             m_content = parts[0] + "## 3. Comprehensive Version Progression Log\n" + parts[1].rstrip() + "\n" + log_text
         else:
             m_content += f"\n\n---\n\n## 5. Comprehensive Version Progression Log\n{log_text}\n"
@@ -756,7 +807,7 @@ def jump_version(target_version, project_name=None, vault_path=None):
 def reopen_version(version, project_name=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
     state = _load_state(vault)
-    pname = project_name if project_name else state.get("active_project")
+    pname = _resolve_project_name(project_name, state)
     if not pname or pname not in state.get("projects", {}):
         return {"success": False, "error": f"Project '{pname}' not found"}
         
@@ -775,7 +826,7 @@ def reopen_version(version, project_name=None, vault_path=None):
     if os.path.exists(v_file):
         with open(v_file, "r", encoding="utf-8") as f:
             content = f.read()
-        content = content.replace("**Status:** completed", "**Status:** in_progress")
+        content = re.sub(r'(?m)^(\*\*Status:\*\*|\*\*Status\*\*:)\s*completed\s*$', r'**Status:** in_progress', content)
         if "## Retroactive Reopening & Amendments" not in content:
             content += f"\n\n---\n\n## Retroactive Reopening & Amendments ({_utc_now_date()})\n"
         with open(v_file, "w", encoding="utf-8") as f:
@@ -791,14 +842,23 @@ def reopen_version(version, project_name=None, vault_path=None):
 
 def validate_vault(project_name=None, vault_path=None):
     vault = resolve_vault_path(vault_path)
-    state = _load_state(vault)
-    errors = []
-    
     state_file = os.path.join(vault, "state.json")
     if not os.path.exists(state_file):
-        errors.append(f"Missing state file: {state_file}")
-        
-    pname = project_name if project_name else state.get("active_project")
+        return {
+            "valid": False,
+            "errors": [f"Missing state file: {state_file}"]
+        }
+
+    try:
+        state = _load_state(vault)
+    except Exception as exc:
+        return {
+            "valid": False,
+            "errors": [f"Corrupt state file: {exc}"]
+        }
+
+    errors = []
+    pname = _resolve_project_name(project_name, state)
     if not pname:
         return {
             "valid": True,
@@ -886,7 +946,7 @@ def main():
 
     # complete
     p_complete = subparsers.add_parser("complete", help="Complete a version and advance to N+1")
-    p_complete.add_argument("--version", type=int, required=True, help="Version to complete")
+    p_complete.add_argument("--version", type=int, default=None, help="Version to complete (defaults to active_version)")
     p_complete.add_argument("--project", help="Project name")
     p_complete.add_argument("--vault", help="Custom vault path")
 
@@ -919,13 +979,8 @@ def main():
         res = sync_project(args.project, args.version, args.vault)
         print(json.dumps(res, indent=2))
     elif args.command == "read":
-        res = read_project(args.project, args.vault)
-        cli_res = dict(res)
-        if "master_evolution_content" in cli_res:
-            del cli_res["master_evolution_content"]
-        if "graveyard_content" in cli_res:
-            del cli_res["graveyard_content"]
-        print(json.dumps(cli_res, indent=2))
+        res = read_project(args.project, args.vault, include_content=False)
+        print(json.dumps(res, indent=2))
     elif args.command == "discover":
         res = discover_item(args.title, args.asset_path, args.summary, args.project, args.vault)
         print(json.dumps(res, indent=2))

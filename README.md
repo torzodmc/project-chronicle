@@ -1,20 +1,18 @@
-This is a heavily vibe coded skill that i made for my own use, it is made for projects that develops as versions such as version 1 ,2 ,3 etc. 
-It keeps track of all the versions, records the stuff that the ai cant observe via code easily, like the intention behind stuff, the philosophy behind any certain features , etc.
-YOu can make a project and keeping making versions of it, pretty usefull to keep track of the project overall.
-i made this for antigravity btw
-
-
 # Project Chronicle
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
 [![Compatible With: Antigravity & Claude Code](https://img.shields.io/badge/AI%20Assistants-Antigravity%20%7C%20Claude%20Code-purple.svg)](https://github.com/torzodmc/project-chronicle)
 
+> *"A dedicated knowledge engine for software that evolves through version iterations (V1, V2, V3...). It permanently captures what AI models cannot observe from raw code alone: human intent, architectural philosophy, epistemic pivots, discarded failure modes, and reusable research breakthroughs."*
+
+---
+
 **Project Chronicle** is a universal evolutionary knowledge engine and skill suite for AI pair programming. It bridges the gap between ephemeral conversational AI context and long-term project reality across iterative software lifecycles.
 
 Instead of losing human intent, conversational debates, architectural pivots, and discarded failure modes across chats, Project Chronicle permanently captures:
 1. **Living Axioms & Philosophy:** The creator's foundational intent, mental models, and non-negotiable architectural boundaries.
-2. **Feature Lifecycle Matrix:** Exhaustive tracking of every feature from inception, evolution, refactoring, or retirement with exact reasons.
+2. **Universal Feature Lifecycle Matrix:** Exhaustive tracking of every feature from inception, evolution, refactoring, or retirement with exact reasons.
 3. **Graveyard of Discarded Traps:** Permanent anti-patterns and failure traps so future AI agents never mistakenly re-suggest flawed ideas.
 4. **Independent Discoveries & Research Catalog:** Permanent storage for experimental breakthroughs, standalone algorithms, mathematical proofs, or benchmarked assets without polluting sequential version milestones.
 5. **Read-Only Observer Mode:** Instant hydration of deep architectural and risk context for side spikes, benchmarks, and prototypes without version authoring duties.
@@ -23,26 +21,27 @@ Instead of losing human intent, conversational debates, architectural pivots, an
 
 ## The Chronicle Skill Suite
 
-Project Chronicle exposes 9 modular agent skills compatible with **Antigravity**, **Claude Code**, and agentic coding platforms:
+Project Chronicle exposes 9 modular, namespaced agent skills compatible with **Antigravity**, **Claude Code**, and agentic coding platforms:
 
-| Skill / Command | Description |
-|---|---|
-| `/chronicle:new` | Initializes a brand-new project chronicle division in the vault with foundational templates. |
-| `/chronicle:sync` | Hydrates a new chat session with living axioms, master evolution, active version dossier, and graveyard traps. |
-| `/chronicle:read` | Read-only observer mode: loads complete project context for side tasks and prototypes without version authoring duties. |
-| `/chronicle:discover` | Records an experimental breakthrough, algorithm, proof, model, or benchmarked asset into the permanent research catalog. |
-| `/chronicle:update` | Captures epistemic diffs, conversational debates, user pushbacks, and architectural pivots into the active version and master evolution. |
-| `/chronicle:complete` | Seals the active version with empirical verification evidence and advances active tracking to $V_{N+1}$. |
-| `/chronicle:jump` | Fast-forwards tracking across multiple unchronicled iterations (e.g. $V_1 \to V_5$), cleanly recording skipped gaps. |
-| `/chronicle:reopen` | Reopens a historical completed milestone for retroactive amendments or ongoing refinement. |
-| `/chronicle:status` | Displays project health, active version pointer, total versions, and historical progression timeline. |
+| Skill / Command | Trigger Alias | Description |
+|---|---|---|
+| `/chronicle:new` | `/chronicle-new` | Initializes a brand-new project chronicle division in the vault with foundational templates. |
+| `/chronicle:sync` | `/chronicle-sync` | Hydrates a new chat session with living axioms, master evolution, active version dossier, and graveyard traps. |
+| `/chronicle:read` | `/chronicle-read` | Read-only observer mode: loads complete project context for side tasks and prototypes without version authoring duties. |
+| `/chronicle:discover` | `/chronicle-discover` | Records an experimental breakthrough, algorithm, proof, model, or benchmarked asset into the permanent research catalog. |
+| `/chronicle:update` | `/chronicle-update` | Captures epistemic diffs, conversational debates, user pushbacks, and architectural pivots into the active version and master evolution. |
+| `/chronicle:complete` | `/chronicle-complete` | Seals the active version with empirical verification evidence and advances active tracking to $V_{N+1}$. |
+| `/chronicle:jump` | `/chronicle-jump` | Fast-forwards tracking across multiple unchronicled iterations (e.g. $V_1 \to V_5$), cleanly recording skipped gaps. |
+| `/chronicle:reopen` | `/chronicle-reopen` | Reopens a historical completed milestone for retroactive amendments or ongoing refinement. |
+| `/chronicle:status` | `/chronicle-status` | Displays project health, active version pointer, total versions, and historical progression timeline. |
 
 ---
 
 ## Architectural Principles
 
-- **Zero External Dependencies:** Built with 100% pure Python standard library (`os`, `json`, `sys`, `argparse`, `datetime`). Runs immediately on Windows, macOS, and Linux without `pip install` or virtual environments.
-- **Strict Workspace Isolation:** AI agents are forbidden from probing outside the active workspace directory, ensuring clean boundaries during multi-project workflows.
+- **Zero External Dependencies:** Built with 100% pure Python standard library (`os`, `json`, `sys`, `re`, `argparse`, `datetime`). Runs immediately on Windows, macOS, and Linux without `pip install` or virtual environments.
+- **Atomic State Persistence:** All `state.json` modifications are written atomically via temporary swap files (`.tmp` $\to$ `os.replace`), preventing 0-byte state corruption during interrupted executions.
+- **Strict Workspace Isolation:** Projects are automatically bound to their root workspace directories to prevent state bleed across different repositories on the same machine.
 - **Epistemic Diff Protocol:** Banning bland, sterile bullet points. Agents document the *Old Assumption*, the *Collision Event* that shattered it, and the *New Reality*.
 - **The Graveyard Mechanism:** Captures not just what failed, but *why it was tempting* and *why future AIs will mistakenly re-propose it*, accompanied by permanent invariant counter-rules.
 
@@ -79,6 +78,9 @@ python scripts/chronicle_helper.py init --project my-project
 # Check status
 python scripts/chronicle_helper.py status
 
+# Complete active version and advance to N+1
+python scripts/chronicle_helper.py complete
+
 # Record a breakthrough discovery
 python scripts/chronicle_helper.py discover --title "Lock-Free Ring Buffer" --asset-path "core/ring_buffer.py" --summary "Zero-allocation atomic queue"
 
@@ -90,14 +92,14 @@ python scripts/chronicle_helper.py validate
 
 ## Vault Hierarchy
 
-By default, Project Chronicle stores project evolutions in a centralized vault at `~/.chronicles/` or `E:\chronicles\` (configurable via `CHRONICLE_VAULT` environment variable or `--vault` flag):
+By default, Project Chronicle stores project evolutions in a centralized vault at `~/.chronicles/` (configurable via `CHRONICLE_VAULT` environment variable, project-local `.chronicle` directory, or `--vault` flag):
 
 ```text
 chronicles/
-├── state.json                     # Registry of active projects, versions, and discoveries
+├── state.json                     # Atomic registry of active projects, workspace bindings, versions, and discoveries
 └── projects/
     └── <project_name>/
-        ├── master_evolution.md    # Living manifesto, invariants, lifecycle matrix, and research catalog
+        ├── master_evolution.md    # 6-Chapter living manifesto, invariants, lifecycle matrix, and research catalog
         ├── graveyard_of_traps.md  # Comprehensive catalog of discarded anti-patterns
         ├── versions/
         │   ├── v1.md              # Milestone 1 dossier with epistemic diffs and verification
@@ -111,10 +113,10 @@ chronicles/
 
 ## Testing & Quality Assurance
 
-Project Chronicle includes a comprehensive unit test suite covering initialization, status tracking, version completion, jumping, reopening, validation, observer mode, and discovery cataloging:
+Project Chronicle includes a comprehensive unit test suite covering initialization, status tracking, version completion, jumping without markdown corruption, reopening, atomic persistence, observer mode, and discovery cataloging:
 
 ```bash
-python -m unittest tests/test_chronicle_helper.py
+python -m unittest discover -s tests
 ```
 
 ---

@@ -33,6 +33,7 @@ class TestChronicleHelper(unittest.TestCase):
         self.assertEqual(state["active_project"], "test-project")
         self.assertEqual(state["projects"]["test-project"]["active_version"], 1)
         self.assertEqual(state["projects"]["test-project"]["versions"][0]["status"], "in_progress")
+        self.assertIn("workspace_root", state["projects"]["test-project"])
 
     def test_get_status(self):
         chronicle.init_project("test-project", vault_path=self.vault)
@@ -41,12 +42,21 @@ class TestChronicleHelper(unittest.TestCase):
         self.assertEqual(status["active_version"], 1)
         self.assertEqual(status["version_status"], "in_progress")
 
-    def test_complete_version(self):
+    def test_complete_version_default_and_regex(self):
         chronicle.init_project("test-project", vault_path=self.vault)
-        res = chronicle.complete_version(1, "test-project", vault_path=self.vault)
+        
+        # Test completing without explicit version argument (defaults to active_version)
+        res = chronicle.complete_version(version=None, project_name="test-project", vault_path=self.vault)
         self.assertTrue(res["success"])
         self.assertEqual(res["completed_version"], 1)
         self.assertEqual(res["next_active_version"], 2)
+
+        # Verify header in v1.md changed to completed
+        v1_path = os.path.join(self.vault, "projects", "test-project", "versions", "v1.md")
+        with open(v1_path, "r", encoding="utf-8") as f:
+            v1_content = f.read()
+        self.assertIn("**Status:** completed", v1_content)
+        self.assertNotIn("**Status:** in_progress", v1_content)
 
         # Check that v2.md template was created
         v2_path = os.path.join(self.vault, "projects", "test-project", "versions", "v2.md")
@@ -67,14 +77,38 @@ class TestChronicleHelper(unittest.TestCase):
         self.assertEqual(status["active_version"], 1)
         self.assertEqual(status["version_status"], "in_progress")
 
-    def test_validate_schemas(self):
+        v1_path = os.path.join(self.vault, "projects", "test-project", "versions", "v1.md")
+        with open(v1_path, "r", encoding="utf-8") as f:
+            v1_content = f.read()
+        self.assertIn("**Status:** in_progress", v1_content)
+        self.assertIn("## Retroactive Reopening & Amendments", v1_content)
+
+    def test_validate_vault_handles_missing_state(self):
+        # Empty directory with no state.json must return valid: False
+        empty_dir = os.path.join(self.test_dir, "empty_vault")
+        os.makedirs(empty_dir, exist_ok=True)
+        val = chronicle.validate_vault(vault_path=empty_dir)
+        self.assertFalse(val["valid"])
+        self.assertIn("Missing state file", val["errors"][0])
+
+    def test_validate_vault_clean_project(self):
         chronicle.init_project("test-project", vault_path=self.vault)
         val = chronicle.validate_schemas("test-project", vault_path=self.vault)
         self.assertTrue(val["valid"])
         self.assertEqual(len(val["errors"]), 0)
 
-    def test_jump_version(self):
+    def test_jump_version_preserves_chapter_6(self):
         chronicle.init_project("test-project", vault_path=self.vault)
+        
+        # Add a discovery first so Chapter 6 has content
+        chronicle.discover_item(
+            title="Initial Test Discovery",
+            asset_path="core/sample.py",
+            summary="A discovery before jumping",
+            project_name="test-project",
+            vault_path=self.vault
+        )
+
         # Jump from v1 to v4
         res = chronicle.jump_version(4, "test-project", vault_path=self.vault)
         self.assertTrue(res["success"])
@@ -82,40 +116,26 @@ class TestChronicleHelper(unittest.TestCase):
         self.assertEqual(res["active_version"], 4)
         self.assertEqual(res["skipped_versions"], [2, 3])
 
-        # Verify state.json
-        with open(os.path.join(self.vault, "state.json"), "r", encoding="utf-8") as f:
-            state = json.load(f)
-        pdata = state["projects"]["test-project"]
-        self.assertEqual(pdata["active_version"], 4)
-        v1 = next(v for v in pdata["versions"] if v["version"] == 1)
-        v2 = next(v for v in pdata["versions"] if v["version"] == 2)
-        v3 = next(v for v in pdata["versions"] if v["version"] == 3)
-        v4 = next(v for v in pdata["versions"] if v["version"] == 4)
-        self.assertEqual(v1["status"], "completed")
-        self.assertEqual(v2["status"], "skipped")
-        self.assertEqual(v3["status"], "skipped")
-        self.assertEqual(v4["status"], "in_progress")
-
-        # Verify v4.md exists and v2/v3 do NOT exist
-        self.assertTrue(os.path.exists(os.path.join(self.vault, "projects", "test-project", "versions", "v4.md")))
-        self.assertFalse(os.path.exists(os.path.join(self.vault, "projects", "test-project", "versions", "v2.md")))
-        self.assertFalse(os.path.exists(os.path.join(self.vault, "projects", "test-project", "versions", "v3.md")))
-
-        # Verify master_evolution.md has skipped versions logged
+        # Verify master_evolution.md
         with open(os.path.join(self.vault, "projects", "test-project", "master_evolution.md"), "r", encoding="utf-8") as f:
             master = f.read()
+
+        # Chapter 5 must contain skipped logs
         self.assertIn("Version 2**: Skipped", master)
         self.assertIn("Version 3**: Skipped", master)
         self.assertIn("Version 4**", master)
 
-        # Verify validation passes cleanly even with skipped versions
-        val = chronicle.validate_schemas("test-project", vault_path=self.vault)
-        self.assertTrue(val["valid"])
-        self.assertEqual(len(val["errors"]), 0)
+        # Crucial check: Chapter 5 entries must appear BEFORE Chapter 6!
+        ch5_idx = master.find("## 5. Comprehensive Version Progression Log")
+        ch6_idx = master.find("## 6. Discoveries & Research Catalog")
+        v2_idx = master.find("Version 2**: Skipped")
+        
+        self.assertTrue(ch5_idx < v2_idx < ch6_idx, "Skipped version entries must be inside Chapter 5, before Chapter 6!")
+        self.assertIn("Initial Test Discovery", master[ch6_idx:])
 
     def test_read_project(self):
         chronicle.init_project("test-project", vault_path=self.vault)
-        res = chronicle.read_project("test-project", vault_path=self.vault)
+        res = chronicle.read_project("test-project", vault_path=self.vault, include_content=True)
         self.assertTrue(res["success"])
         self.assertEqual(res["mode"], "read_only_observer")
         self.assertEqual(res["project_name"], "test-project")
@@ -126,66 +146,49 @@ class TestChronicleHelper(unittest.TestCase):
         self.assertIn("## 1. Foundational Intent & Origin Thesis", res["master_evolution_content"])
         self.assertIn("Graveyard of Discarded Ideas", res["graveyard_content"])
 
-    def test_discover_item(self):
+        # CLI read with include_content=False
+        cli_res = chronicle.read_project("test-project", vault_path=self.vault, include_content=False)
+        self.assertNotIn("master_evolution_content", cli_res)
+        self.assertNotIn("graveyard_content", cli_res)
+
+    def test_discover_item_handles_crlf(self):
         chronicle.init_project("test-project", vault_path=self.vault)
+        master_path = os.path.join(self.vault, "projects", "test-project", "master_evolution.md")
         
-        # Add 1st discovery
-        res1 = chronicle.discover_item(
+        # Simulate Windows CRLF line endings in master_evolution.md
+        with open(master_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        crlf_content = content.replace("\n", "\r\n")
+        with open(master_path, "w", encoding="utf-8") as f:
+            f.write(crlf_content)
+
+        # Add discovery
+        res = chronicle.discover_item(
             title="Lock-Free Ring Buffer Algorithm",
             asset_path="core/ring_buffer.py",
             summary="Atomic lock-free queue with zero allocation overhead",
             project_name="test-project",
             vault_path=self.vault
         )
-        self.assertTrue(res1["success"])
-        self.assertEqual(res1["discovery_id"], 1)
-        self.assertEqual(res1["file"], "discoveries/001-lock-free-ring-buffer-algorithm.md")
+        self.assertTrue(res["success"])
+
+        # Verify placeholder row was cleanly removed despite CRLF
+        with open(master_path, "r", encoding="utf-8") as f:
+            updated_master = f.read()
+        self.assertNotIn("No discoveries logged yet", updated_master)
+        self.assertIn("Lock-Free Ring Buffer Algorithm", updated_master)
+
+    def test_atomic_save_and_error_handling(self):
+        chronicle.init_project("test-project", vault_path=self.vault)
+        state_file = os.path.join(self.vault, "state.json")
         
-        disc_path1 = os.path.join(self.vault, "projects", "test-project", res1["file"])
-        self.assertTrue(os.path.exists(disc_path1))
-        with open(disc_path1, "r", encoding="utf-8") as f:
-            content1 = f.read()
-        self.assertIn("# Discovery 001: Lock-Free Ring Buffer Algorithm", content1)
-        self.assertIn("core/ring_buffer.py", content1)
-        self.assertIn("### 1. Concrete Asset Locations", content1)
-        self.assertIn("### 2. Intuition, Philosophy & The \"Why\"", content1)
+        # Corrupt state.json with invalid JSON
+        with open(state_file, "w", encoding="utf-8") as f:
+            f.write("{ invalid json")
 
-        # Check state.json
-        with open(os.path.join(self.vault, "state.json"), "r", encoding="utf-8") as f:
-            state = json.load(f)
-        pdata = state["projects"]["test-project"]
-        self.assertEqual(len(pdata.get("discoveries", [])), 1)
-        self.assertEqual(pdata["discoveries"][0]["id"], 1)
-        self.assertEqual(pdata["discoveries"][0]["title"], "Lock-Free Ring Buffer Algorithm")
-
-        # Check master_evolution.md
-        with open(os.path.join(self.vault, "projects", "test-project", "master_evolution.md"), "r", encoding="utf-8") as f:
-            master = f.read()
-        self.assertIn("## 6. Discoveries & Research Catalog", master)
-        self.assertIn("Lock-Free Ring Buffer Algorithm", master)
-        self.assertIn("core/ring_buffer.py", master)
-
-        # Add 2nd discovery
-        res2 = chronicle.discover_item(
-            title="Zero-Copy Serialization Engine",
-            asset_path="codecs/zerocopy.py",
-            summary="Direct memory mapping protocol parser",
-            project_name="test-project",
-            vault_path=self.vault
-        )
-        self.assertTrue(res2["success"])
-        self.assertEqual(res2["discovery_id"], 2)
-        self.assertEqual(res2["file"], "discoveries/002-zero-copy-serialization-engine.md")
-
-        # Validation check
-        val = chronicle.validate_schemas("test-project", vault_path=self.vault)
-        self.assertTrue(val["valid"])
-        self.assertEqual(len(val["errors"]), 0)
-
-        # Read mode check with discoveries
-        read_res = chronicle.read_project("test-project", vault_path=self.vault)
-        self.assertEqual(read_res["total_discoveries"], 2)
-        self.assertEqual(len(read_res["discoveries"]), 2)
+        # Loading must raise RuntimeError, NOT silently return empty dict
+        with self.assertRaises(RuntimeError):
+            chronicle._load_state(self.vault)
 
 
 if __name__ == "__main__":

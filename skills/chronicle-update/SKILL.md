@@ -1,9 +1,9 @@
 ---
-name: update
-description: "Use when capturing conversation debates, epistemic diffs, feature modifications, philosophy evolution, and new failure traps into the active version dossier and master evolution."
+name: chronicle-update
+description: "Use when capturing conversation debates, epistemic diffs, feature modifications, philosophy evolution, discoveries, and new failure traps into the active version dossier and master evolution."
 ---
 
-# Chronicle: Update Version & Evolution (`/chronicle:update`)
+# Chronicle: Update Version & Evolution (`/chronicle:update` / `/chronicle-update`)
 
 Use this skill when recording session progress, conversational debates, architectural pivots, code modifications, or failure post-mortems into the Project Chronicle.
 
@@ -31,7 +31,7 @@ If a major architectural pivot or philosophical shift occurred during the chat b
 > *"We pivoted from X to Y mid-session—was that driven by test data or an intentional architectural preference?"*
 
 ### 3. Exhaustive Master Evolution Architecture (Forbidding Truncated Bullets)
-The file `master_evolution.md` is the project's living manifesto and intellectual compass—unbounded by length. It must **never** be condensed into sterile bullet points. The agent must maintain and expand all 5 comprehensive chapters:
+The file `master_evolution.md` is the project's living manifesto and intellectual compass—unbounded by length. It must **never** be condensed into sterile bullet points. The agent must maintain and expand all 6 comprehensive chapters:
 
 1. **Chapter 1: Foundational Intent & Origin Thesis**
    - *Core Problem & Origin Story:* Exhaustively explain the original problem that gave birth to the project, prior manual or prototype attempts, human emotional/operational frustrations, and the reason for inception.
@@ -55,6 +55,9 @@ The file `master_evolution.md` is the project's living manifesto and intellectua
 5. **Chapter 5: Comprehensive Version Progression Log**
    - Deterministic chronological milestone timeline of all completed, active, and skipped versions.
 
+6. **Chapter 6: Discoveries & Research Catalog**
+   - Index of all experimental breakthroughs, standalone algorithms, mathematical proofs, and validated research assets.
+
 ### 4. Trap Mechanism Protocol
 If an idea, design pattern, or optimization failed or proved harmful, log it immediately into `graveyard_of_traps.md` answering:
 - **Anti-Pattern / Trap:** Exact name and description of the failed approach.
@@ -70,7 +73,7 @@ If an idea, design pattern, or optimization failed or proved harmful, log it imm
 1. **Verify Current Status:**
    Run the status helper to confirm the active project and version:
    ```bash
-   python "C:/Users/johnp/.gemini/config/plugins/chronicle/scripts/chronicle_helper.py" status
+   python "<path_to_chronicle>/scripts/chronicle_helper.py" status
    ```
 
 2. **Clarify Ambiguities (if any):**
@@ -85,7 +88,7 @@ If an idea, design pattern, or optimization failed or proved harmful, log it imm
    - Update Section 6: *Verification, Testing & Empirical Results* (Commands run, test evidence).
 
 4. **Update Cumulative Master Ledger (`master_evolution.md`):**
-   - Expand and enrich all 5 chapters with complete narrative depth.
+   - Expand and enrich all 6 chapters with complete narrative depth.
    - Update the Universal Feature Lifecycle Matrix with all `[ACTIVE]`, `[MODIFIED in VN]`, and `[RETIRED in VN]` entries.
    - Update Chapter 5 Progression Log with the latest milestone.
 
@@ -94,7 +97,7 @@ If an idea, design pattern, or optimization failed or proved harmful, log it imm
 
 6. **Validate State & Dossiers:**
    ```bash
-   python "C:/Users/johnp/.gemini/config/plugins/chronicle/scripts/chronicle_helper.py" validate
+   python "<path_to_chronicle>/scripts/chronicle_helper.py" validate
    ```
 
 7. **Present Summary:**

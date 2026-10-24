@@ -1,9 +1,9 @@
 ---
-name: read
+name: chronicle-read
 description: "Use when you need complete project context, living axioms, and graveyard traps for side experiments, benchmarks, prototypes, or analysis WITHOUT being bound to or modifying versions."
 ---
 
-# Chronicle: Read Project Context (Observer Mode) (`/chronicle:read`)
+# Chronicle: Read Project Context (Observer Mode) (`/chronicle:read` / `/chronicle-read`)
 
 Use this skill when you want to work on a side task, exploratory spike, benchmark, prototype, forensic analysis, or code review with **complete project context**, but without being bound to an active version cycle.
 
@@ -26,8 +26,9 @@ When this skill is invoked:
 ## Procedure
 
 1. **Execute Read Helper:**
+   Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "C:/Users/johnp/.gemini/config/plugins/chronicle/scripts/chronicle_helper.py" read
+   python "<path_to_chronicle>/scripts/chronicle_helper.py" read
    ```
    *(If targeting a specific project: append `--project <name>`)*
 

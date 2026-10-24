@@ -1,9 +1,9 @@
 ---
-name: sync
+name: chronicle-sync
 description: "Use when starting a new chat or synchronizing project context from the Project Chronicle vault. Hydrates the active session with living axioms, master evolution, active version dossier, and graveyard of traps."
 ---
 
-# Chronicle: Synchronize Context (`/chronicle:sync`)
+# Chronicle: Synchronize Context (`/chronicle:sync` / `/chronicle-sync`)
 
 Use this skill when starting a new chat session or resuming development on a tracked project.
 
@@ -15,9 +15,9 @@ Use this skill when starting a new chat session or resuming development on a tra
 ## Procedure
 
 1. **Locate Vault & Run Sync Helper:**
-   Execute the sync helper:
+   Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "C:/Users/johnp/.gemini/config/plugins/chronicle/scripts/chronicle_helper.py" sync
+   python "<path_to_chronicle>/scripts/chronicle_helper.py" sync
    ```
    *(If targeting a specific project: append `--project <name>`)*
 

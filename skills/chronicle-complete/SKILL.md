@@ -1,9 +1,9 @@
 ---
-name: complete
+name: chronicle-complete
 description: "Use when sealing and completing the active chronicle version with verification evidence, automatically advancing the active pointer to the next version."
 ---
 
-# Chronicle: Complete & Advance Version (`/chronicle:complete`)
+# Chronicle: Complete & Advance Version (`/chronicle:complete` / `/chronicle-complete`)
 
 Use this skill when a milestone, release, or version cycle is officially completed.
 
@@ -21,13 +21,14 @@ Before sealing a version, ensure:
 ## Procedure
 
 1. **Execute Complete Helper:**
+   Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "C:/Users/johnp/.gemini/config/plugins/chronicle/scripts/chronicle_helper.py" complete
+   python "<path_to_chronicle>/scripts/chronicle_helper.py" complete
    ```
-   *(Optionally pass `--version <N>` to seal a specific version)*
+   *(By default, this automatically seals the current active version. Optionally pass `--version <N>` to seal a specific version)*
 
 2. **Underlying Actions Performed:**
-   - Marks `versions/v<N>.md` status as `"completed"` with an ISO timestamp in `state.json`.
+   - Marks `versions/v<N>.md` header status as `"completed"` with an ISO timestamp in `state.json`.
    - Automatically initializes `versions/v<N+1>.md` with status `"in_progress"`.
    - Advances `active_version` pointer to `N + 1`.
 

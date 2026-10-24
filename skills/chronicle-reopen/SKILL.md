@@ -1,9 +1,9 @@
 ---
-name: reopen
+name: chronicle-reopen
 description: "Use when reopening a previously completed chronicle version or historical milestone for retroactive amendments or ongoing refinement."
 ---
 
-# Chronicle: Reopen Completed Version (`/chronicle:reopen`)
+# Chronicle: Reopen Completed Version (`/chronicle:reopen` / `/chronicle-reopen`)
 
 Use this skill when you need to return to, edit, or add retroactive findings to an earlier version that was previously marked completed.
 
@@ -18,8 +18,9 @@ Use this skill when you need to return to, edit, or add retroactive findings to 
    Determine which version number needs to be reopened (e.g. `8`).
 
 2. **Execute Reopen Helper:**
+   Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "C:/Users/johnp/.gemini/config/plugins/chronicle/scripts/chronicle_helper.py" reopen --version <N>
+   python "<path_to_chronicle>/scripts/chronicle_helper.py" reopen --version <N>
    ```
 
 3. **Underlying Actions Performed:**
@@ -30,4 +31,4 @@ Use this skill when you need to return to, edit, or add retroactive findings to 
 4. **Confirm Reopening:**
    Notify the user:
    - *Version [N] is reopened and now actively tracking (`in_progress`).*
-   - Any `/chronicle:update` commands will now append to Version [N] until resealed with `/chronicle:complete`.\n
+   - Any `/chronicle:update` commands will now append to Version [N] until resealed with `/chronicle:complete`.

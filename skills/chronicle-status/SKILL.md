@@ -1,9 +1,9 @@
 ---
-name: status
+name: chronicle-status
 description: "Use when checking current Project Chronicle state, active project, active version status, total versions, and historical timeline across all versions."
 ---
 
-# Chronicle: Status & Timeline (`/chronicle:status`)
+# Chronicle: Status & Timeline (`/chronicle:status` / `/chronicle-status`)
 
 Use this skill to view the active project chronicle, current tracked version, completion statuses, and overall version progression.
 
@@ -15,8 +15,9 @@ Use this skill to view the active project chronicle, current tracked version, co
 ## Procedure
 
 1. **Execute Status Helper:**
+   Locate `scripts/chronicle_helper.py` in the Chronicle installation directory and run:
    ```bash
-   python "C:/Users/johnp/.gemini/config/plugins/chronicle/scripts/chronicle_helper.py" status
+   python "<path_to_chronicle>/scripts/chronicle_helper.py" status
    ```
 
 2. **Display Chronicle Health & Timeline:**
@@ -25,6 +26,6 @@ Use this skill to view the active project chronicle, current tracked version, co
    - If an active project exists:
      Output formatted table with:
      - **Active Project:** Name of the tracked project
-     - **Vault Path:** `E:\chronicles`
+     - **Vault Path:** Resolved vault directory
      - **Active Version:** Version number and status (`in_progress` or `completed`)
      - **Timeline Table:** All recorded versions, statuses, and dates (including skipped milestones).
