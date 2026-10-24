@@ -1,3 +1,9 @@
+This is a heavily vibe coded skill that i made for my own use, it is made for projects that develops as versions such as version 1 ,2 ,3 etc. 
+It keeps track of all the versions, records the stuff that the ai cant observe via code easily, like the intention behind stuff, the philosophy behind any certain features , etc.
+YOu can make a project and keeping making versions of it, pretty usefull to keep track of the project overall.
+i made this for antigravity btw
+
+
 # Project Chronicle
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
